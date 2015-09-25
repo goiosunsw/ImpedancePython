@@ -143,6 +143,78 @@ class ImpedanceMeasurement(object):
         pl.legend()
         
         return fig
+    
+    def GuessNominalFreqFromFileName(self):
+        '''tries to guess note frequency from the file name
+        '''
+        
+        import aubio
+        import re
+        
+        tokens=re.findall('^([A-Ga-g]\D*\d)',self.name)
+    
+        try:
+            notename=re.sub('s','#',tokens[0])
+            f=aubio.miditofreq(aubio.note2midi(notename))
+        except (ValueError,IndexError):
+            f=np.NaN
+    
+        return f
+    
+    def copy(self):
+        '''Create a new object with the same values as this one'''
+        import copy
+        
+        return copy.deepcopy(self)
+    
+    def correctImpedance(self, g=lambda x,y : x):
+        ''' Apply a function g to correct the measured impedance
+         the format of g is g(Zi,f), where Zi is the measured impedance
+         and f the frequency'''
+         
+        newimp = self.copy()
+        
+        zraw = self.getImpedance()
+        f = self.getFrequencyVect()
+        
+        newimp.z = g(zraw,f)
+        
+        return newimp
+        
+        
+        
+    def addParallelMouthpiece(self, vol = 3.5e-7, mass = 4500.0, res = 0.0):
+        ''' Calculate the "Impedance seen by the mouthpiece flow", 
+        given the reed parameters:
+          * vol:  equivalent volume of the reed (acoustic) 
+          * mass: equivalent acoustic mass of the reed
+          * res:  equivalent acoustic resistance
+        '''
+        
+        # reed equivalent volume
+        eqvol = vol
+        gamma=1.4
+        p0=1.013e5
+        eqc = eqvol / ( gamma * p0 )
+        # reed equivalent resistance
+        eqr = res
+        # reed acoustic mass
+        eqm = mass
+    
+        # reed impedance
+        zreed = lambda ff: 1./(1j*2.*np.pi*ff*eqc) + eqr + 1j*2.*np.pi*ff*eqm
+        g = lambda zi,ff: 1./zi + 1./zreed(ff)
+        
+        newimp = self.correctImpedance()
+        
+        return newimp.getImpedance()
+        
+    def getImpedance(self):
+        return self.z.squeeze()
+
+    def getFrequencyVect(self):
+        return self.f
+
         
     def findPeaks(self):
         import PeakFinder as pk
@@ -157,6 +229,19 @@ class ImpedanceMeasurement(object):
 
         return fpk,zpk
     
+    def findPeaksCorrected(self, vol = 3.5e-7, mass = 4500.0, res = 0.0):
+        import PeakFinder as pk
+        
+        f = self.f
+        z = self.addParallelMouthpiece(vol=vol,mass=mass,res=res)
+        pf=pk.PeakFinder(abs(z))
+        pf.refine_all(rad=3,logarithmic=True)
+        pf.filter_by_salience(rad=5)
+    
+        fpk = np.interp(pf.get_pos(),np.arange(len(f)),f)
+        zpk = np.interp(pf.get_pos(),np.arange(len(f)),abs(z))
+
+        return fpk,zpk
         
     
         
