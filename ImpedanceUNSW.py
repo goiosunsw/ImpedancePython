@@ -40,9 +40,30 @@ class ImpedanceMeasurement(object):
                 raise IOError('Unrecognised format for the impedance file')
         else:
             raise IOError('File not found:''%s''',filename)
+            
+        # Keep track of derived impedances
+        self.dernum=0
     
     def set_name(self,name):
         self.name=name
+        
+    def get_name(self):
+        return self.name
+    
+    def add_suffix_to_name(self, suf='Corr'):
+        cur = self.get_name()
+        sufst = str.find(cur,'-'+suf)
+        if self.dernum > 0:
+            basename = cur[0:sufst]
+            remaining = cur[sufst+len(suf)+2:]
+            n = self.dernum
+            newname = (cur[0:sufst] + '-%s-%d')%(suf, n)
+        else:
+            newname = (cur + '-%s')%(suf)
+        
+        self.dernum += 1
+        self.set_name(newname)
+            
     
     def detectFormat(self, filename):
         format = ''
@@ -178,6 +199,7 @@ class ImpedanceMeasurement(object):
         f = self.getFrequencyVect()
         
         newimp.z = g(zraw,f)
+        newimp.add_suffix_to_name(suf='Corr')
         
         return newimp
         
