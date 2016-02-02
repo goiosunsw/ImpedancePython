@@ -172,7 +172,7 @@ class ImpedanceMeasurement(object):
         import aubio
         import re
         
-        tokens=re.findall('^([A-Ga-g]\D*\d)',self.name)
+        tokens=re.findall('([A-Ga-g][sS#bB+-]*\d+)',self.name)
     
         try:
             notename=re.sub('s','#',tokens[0])
@@ -239,6 +239,8 @@ class ImpedanceMeasurement(object):
 
         
     def findPeaks(self):
+        '''Finds the frequencies and values of impedance maxima
+        '''
         import PeakFinder as pk
         
         f = self.f
@@ -250,6 +252,26 @@ class ImpedanceMeasurement(object):
         zpk = np.interp(pf.get_pos(),np.arange(len(f)),abs(self.z.squeeze()))
 
         return fpk,zpk
+
+    def findZeroPh(self, direction=-1):
+        '''Finds the frequencies at which the phase is 0
+        * default, find zero crossings with negative slope
+        * direction=+1 finds those with positive slope
+        '''
+        
+        f = self.getFrequencyVect()
+        z = self.getImpedance()
+        za = np.angle(z)*direction
+        
+        zci=np.nonzero(np.all((za[:-1]<0.,za[1:]>0.),axis=0))
+        azcf = []
+        for ii in zci:
+            azcf.append((f[ii]-(f[ii+1]-f[ii])/(za[ii+1]-za[ii])*za[ii]))
+        
+        zcf = np.array(azcf).squeeze()
+
+        return zcf,np.interp(zcf,f,np.abs(z))
+
     
     def findPeaksCorrected(self, vol = 3.5e-7, mass = 4500.0, res = 0.0):
         import PeakFinder as pk
