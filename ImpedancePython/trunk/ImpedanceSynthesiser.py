@@ -115,7 +115,11 @@ class DuctSection(object):
         (0-length cylinder)
         '''
         pass
+        self.length = 0.0
         
+    def get_length(self):
+        return self.length
+            
     def _chain_reflection_coeff_at_freq(self, r_in, freq):
         '''Calculate reflection coefficient at beginning of section,
         when section is chained to a termination 
@@ -188,7 +192,7 @@ class DuctSection(object):
             world = AcousticWorld()
         return world.viscous_boundary_layer_const,\
                world.thermal_boundary_layer_const
-    
+
     def set_parent(self, parent):
         self.parent=parent
         self._recalc()
@@ -220,7 +224,9 @@ class StraightDuct(DuctSection):
         else:
             return self._propagation_coeff(freq)
 
-    
+    def get_radius_at_position(self, position=0.0):
+        return self.get_input_radius()
+
     def _propagation_coeff(self, freq):
         c = self.get_speed_of_sound()
         rho = self.get_medium_density()
@@ -251,9 +257,6 @@ class StraightDuct(DuctSection):
     def get_output_radius(self):
         return self.radius
         
-    def get_length(self):
-        return self.length
-            
     def travelling_mx_at_freq(self, freq=0.0):
         
         phase = 2*np.pi*freq*self.length/self.get_speed_of_sound()
@@ -261,10 +264,17 @@ class StraightDuct(DuctSection):
         return np.array([[np.exp(1j*phase),0],[0,np.exp(-1j*phase)]])
 
     def transfer_mx_at_freq(self, freq=0.0):
+        return self.two_point_transfer_mx_at_freq(freq=freq)
+
+    def two_point_transfer_mx_at_freq(self, freq=0.0, from_pos=0.0, to_pos=None):
         
+        if to_pos is None:
+            to_pos = self.get_length()
         
+        distance = to_pos-from_pos
+
         prop_coeff = self.get_propagation_coefficient(freq)
-        phase = prop_coeff*self.length
+        phase = prop_coeff*distance
         
         return np.array([[np.cos(phase),
                             1j*self.char_impedance*np.sin(phase)],
@@ -341,44 +351,56 @@ class Duct(PortImpedance):
 
         self.set_acoustic_world(world)
         self.elements = []
+        self.element_positions = []
         self.termination = PerfectOpenEnd()
         self.world = world
         self.losses = losses
-        
-    def set_acoustic_world(self,world):
+
+    def set_acoustic_world(self, world):
         self.speed_of_sound = world.speed_of_sound
         self.medium_density = world.medium_density
-        
+
     def append_element(self, element):
         assert isinstance(element, DuctSection)
         element.set_parent(self)
         self.elements.append(element)
-        
+        self.update_element_pos()
+
     def insert_element(self, element, pos):
         assert isinstance(element, DuctSection)
         element.set_parent(self)
         self.elements.insert(element, pos)
-        
+        self.update_element_pos()
+
+    def update_element_pos(self):
+        new_positions = []
+        start_position = 0.0
+        for el in self.elements:
+            new_positions.append(start_position)
+            start_position += el.get_length()
+
+        self.element_positions = new_positions
+
     def set_termination(self, term):
         assert isinstance(term, TerminationImpedance)
         self.termination = term
-        
+
     def get_input_reflection_function_at_freq(self, f):
         r = self.termination._get_reflection_coeff_at_freq(f)
         for el in reversed(self.elements):
             r = el._chain_reflection_coeff_at_freq(r, f)
         return r
-    
+
     def get_input_impedance_at_freq(self, f):
         z = self.termination._get_impedance_at_freq(f)
         for el in reversed(self.elements):
             z = el._chain_impedance_at_freq(z, f)
         return z
-        
+
     def get_coords(self):
-        old_x=0
-        x=[]
-        y=[]
+        old_x = 0
+        x = []
+        y = []
         for el in self.elements:
             x.append(old_x)
             y.append(el.get_input_radius())
@@ -386,4 +408,49 @@ class Duct(PortImpedance):
             y.append(el.get_output_radius())
             old_x = x[-1]
 
-        return x,y
+        return x, y
+
+    def get_element_at_position(self, position=0.0):
+        pos_el = zip(self.element_positions, self.elements)
+        for order, (pos, el) in enumerate(pos_el):
+            if pos+el.get_length() > position:
+                return order, el
+
+    def get_radius_at_position(self, position=0.0):
+        el_nbr, el = self.get_element_at_position(position=position)
+        relative_pos = position - self.element_positions[el_nbr]
+        el_rad = el.get_radius_at_position(relative_pos)
+        return el_rad
+
+    def get_transfer_mx_at_freq(self, from_pos=0.0, to_pos=0.0):
+        """ Returns the pressure/ flow transfer matrix between 
+        two positions of the duct
+        
+        get_transfer_mx_at_freq(from_pos=0.0, to_pos=0.0)
+        arguments:
+            from_pos: position of source from upstream
+            to_pos: position of source from upstream
+				(negative position means relative to downstream)
+
+        returns:
+            2x2 matrix T such that:
+                [pi, ui] = [t11,t12; t21, t22] [po, uo]
+        """
+
+        start_nb, start_element = self.get_element_at_position(from_pos)
+        end_nb, end_element = self.get_element_at_position(to_pos)
+        from_pos_rel = from_pos - self.element_positions[start_nb]
+        to_pos_rel = to_pos - self.element_positions[end_nb]
+
+        if start_nb == end_nb:
+            start_element.get_two_point_transfer_mx_at_freq(from_pos=from_pos_rel,
+                                                            to_pos=to_pos_rel)
+        else:
+			mx = start_element.get_two_point_transfer_mx_at_freq(from_pos=from_pos_rel)
+			for el in self.elements[start_nbr+1:end_nb]:
+				mx = np.dot(mx, el.get_transfer_mx_at_freq())
+			mx = np.dot(mx,
+                        el.get_two_point_transfer_mx_at_freq(from_pos=0.0,
+                                                             to_pos=to_pos_rel))
+        return mx
+
