@@ -304,9 +304,9 @@ class StraightDuct(DuctSection):
                           np.cos(phase)]])
 
     def get_characteristic_impedance(self):
-        return self.get_medium_density()*\
-                          self.get_speed_of_sound()/\
-                          self.cross_section
+        return self.get_medium_density() *\
+            self.get_speed_of_sound() /\
+            self.cross_section
 
 
 class TerminationImpedance(DuctSection):
@@ -323,15 +323,15 @@ class TerminationImpedance(DuctSection):
 
     def _get_impedance_at_freq(self, f):
         r = self._get_reflection_coeff_at_freq(f)
-        if r!=1.0:
+        if r != 1.0:
             return (1.+r)/(1.-r)
         else:
             return np.inf
 
     def plot_impedance(self, fig=None, fmin=0.0, fmax=4000.0, npoints=200):
         if not fig:
-            fig, ax=pl.subplots(2, sharex=True)
-        fvec = np.linspace(fmin,fmax,npoints)
+            fig, ax = pl.subplots(2, sharex=True)
+        fvec = np.linspace(fmin, fmax, npoints)
         zvec = np.array([self._get_impedance_at_freq(f) for f in fvec])
 
         ax[0].plot(fvec, np.abs(zvec))
@@ -359,7 +359,7 @@ class PortImpedance(object):
     def __init__(self):
         pass
 
-    def get_input_impedance_at_freq(self,f):
+    def get_input_impedance_at_freq(self, f):
         '''
         Retrieve the input impedance at a particular value of frequency
         '''
@@ -488,14 +488,14 @@ class Duct(PortImpedance):
         from_pos_rel = from_pos - self.element_positions[start_nb]
         to_pos_rel = end_pos - self.element_positions[end_nb]
 
+        start_trans_mx = start_element.two_point_transfer_mx_at_freq
         if start_nb == end_nb:
-            mx = start_element.two_point_transfer_mx_at_freq(from_pos=from_pos_rel,
-                                                             to_pos=to_pos_rel,
-                                                             freq=freq)
+            mx = start_trans_mx(from_pos=from_pos_rel,
+                                to_pos=to_pos_rel,
+                                freq=freq)
         else:
-            mx =\
-                start_element.two_point_transfer_mx_at_freq(from_pos=from_pos_rel,
-                                                        freq=freq)
+            mx = start_trans_mx(from_pos=from_pos_rel,
+                                freq=freq)
             for el in self.elements[start_nb+1:end_nb]:
                 mx = np.dot(mx, el.transfer_mx_at_freq(freq=freq))
 
