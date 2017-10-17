@@ -115,8 +115,8 @@ class DuctSection(object):
         Default is a section that does not change presure and flow
         (0-length cylinder)
         '''
-        pass
         self.length = 0.0
+        self.char_impedance = np.nan
 
     def get_length(self):
         return self.length
@@ -156,6 +156,8 @@ class DuctSection(object):
         else:
             return np.inf
 
+    def get_characteristic_impedance(self):
+        return self.char_impedance
 
     def travelling_mx_at_freq(self, freq=0.0):
         ''' return the transfer matrix of the section
@@ -203,6 +205,7 @@ class DuctSection(object):
 
 class StraightDuct(DuctSection):
     def __init__(self, length = 0.5, radius = 0.1):
+        super(DuctSection, self).__init__()
         self.radius = radius
         self.length = length
         self.parent = None
@@ -210,9 +213,16 @@ class StraightDuct(DuctSection):
         self._recalc()
         self.gamma = 1.4
 
-    def _recalc(self):
+    def _reset_impedance(self):
         self.cross_section = np.pi*self.get_input_radius()**2
         self.char_impedance = self.get_characteristic_impedance()
+        if self.parent:
+            self.normalized_impedance =\
+                self.char_impedance/self.parent.get_characteristic_impedance()
+
+    def _recalc(self):
+        self._reset_impedance()
+        self.cross_section = np.pi*self.get_input_radius()**2
         rvc_per_rad, rtc_per_rad = self.get_boundary_layer_constants()
         self.rv_const = rvc_per_rad * self.radius
         self.rt_const = rtc_per_rad * self.radius
@@ -375,8 +385,15 @@ class Duct(PortImpedance):
         self.speed_of_sound = world.speed_of_sound
         self.medium_density = world.medium_density
 
+    def get_characteristic_impedance(self):
+        return self.char_impedance
+
     def append_element(self, element):
         assert isinstance(element, DuctSection)
+        # set duct characteristic impedance if first element
+        if len(self.elements) == 0:
+            self.char_impedance =\
+                element.get_characteristic_impedance()
         element.set_parent(self)
         self.elements.append(element)
         self.update_element_pos()

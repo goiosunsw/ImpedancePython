@@ -290,6 +290,24 @@ class DuctTests(unittest.TestCase):
                                                               tm_d[row, col],
                                                               tm_s[row, col]))
 
+    def test_travelling_mx_in_zero_length(self):
+        duct = random_duct()
+
+        fvec = freq_vector()
+
+        solution = np.array([[1, 0], [0, 1]])
+        pos = np.random.random()*duct.get_total_length()
+        err_msg = 'Failed at freq {}:\n * tm_s[{},{}] = {},\n   expected {}'
+
+        for f in fvec:
+            tm_d = duct.travelling_mx_at_freq(freq=f, from_pos=pos, to_pos=pos)
+            for row in range(tm_d.shape[0]):
+                for col in range(tm_d.shape[1]):
+                    self.assertAlmostEqual(tm_d[row, col], solution[row, col],
+                                           msg=err_msg.format(f, row, col,
+                                                              tm_d[row, col],
+                                                              solution[row, col]))
+
     def test_travelling_mx_in_chained_sections(self):
         n_seg = 1+np.random.randint(9)
         radii = np.random.random() * np.ones(n_seg)
@@ -329,7 +347,7 @@ class DuctTests(unittest.TestCase):
                                                               tm_s[row, col]))
 
     def test_transfer_mx_in_chained_sections(self):
-        n_seg = 2 #1+np.random.randint(2)
+        n_seg = 2
         radii = np.random.random() * np.ones(n_seg)
         duct = random_duct(n_segments=n_seg, radii=radii)
         section = StraightDuct(length=duct.get_total_length())
