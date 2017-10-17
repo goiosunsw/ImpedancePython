@@ -8,6 +8,7 @@ Uses global parameters contained in phys_params
 """
 
 import numpy as np
+import sys
 import matplotlib.pyplot as pl
 
 
@@ -257,16 +258,24 @@ class StraightDuct(DuctSection):
     def get_output_radius(self):
         return self.radius
         
-    def travelling_mx_at_freq(self, freq=0.0):
+    def two_point_travelling_mx_at_freq(self, freq=0.0, 
+                                        from_pos=0.0, to_pos=None):
         
-        phase = 2*np.pi*freq*self.length/self.get_speed_of_sound()
+        if to_pos is None:
+            to_pos = self.get_length()
+        
+        distance = to_pos-from_pos
+
+
+        phase = 2*np.pi*freq*distance/self.get_speed_of_sound()
         
         return np.array([[np.exp(1j*phase),0],[0,np.exp(-1j*phase)]])
 
     def transfer_mx_at_freq(self, freq=0.0):
         return self.two_point_transfer_mx_at_freq(freq=freq)
 
-    def two_point_transfer_mx_at_freq(self, freq=0.0, from_pos=0.0, to_pos=None):
+    def two_point_transfer_mx_at_freq(self, freq=0.0, 
+                                      from_pos=0.0, to_pos=None):
         
         if to_pos is None:
             to_pos = self.get_length()
@@ -413,8 +422,10 @@ class Duct(PortImpedance):
     def get_element_at_position(self, position=0.0):
         pos_el = zip(self.element_positions, self.elements)
         for order, (pos, el) in enumerate(pos_el):
-            if pos+el.get_length() > position:
+            if pos+el.get_length() >= position:
                 return order, el
+        # out of bounds:
+        return np.nan, None
 
     def get_radius_at_position(self, position=0.0):
         el_nbr, el = self.get_element_at_position(position=position)
@@ -422,35 +433,51 @@ class Duct(PortImpedance):
         el_rad = el.get_radius_at_position(relative_pos)
         return el_rad
 
-    def get_transfer_mx_at_freq(self, from_pos=0.0, to_pos=0.0):
-        """ Returns the pressure/ flow transfer matrix between 
+    def get_total_length(self):
+        return (self.element_positions[-1] + self.elements[-1].get_length())
+
+    def transfer_mx_at_freq(self, freq=0.0,
+                            from_pos=0.0, to_pos=None):
+        """ Returns the pressure/ flow transfer matrix between
         two positions of the duct
-        
-        get_transfer_mx_at_freq(from_pos=0.0, to_pos=0.0)
+
+        transfer_mx_at_freq(from_pos=0.0, to_pos=0.0)
         arguments:
             from_pos: position of source from upstream
             to_pos: position of source from upstream
-				(negative position means relative to downstream)
+            (negative position means relative to downstream)
 
         returns:
             2x2 matrix T such that:
                 [pi, ui] = [t11,t12; t21, t22] [po, uo]
-        """
+                """
+
+        # sys.stderr.write('{}\n'.format(to_pos))
+        if to_pos is None:
+            total_length = self.get_total_length()
+            # sys.stderr.write('\nsetting position to {}\n'.format(total_length))
+            end_pos = total_length
+        else:
+            end_pos = to_pos
 
         start_nb, start_element = self.get_element_at_position(from_pos)
-        end_nb, end_element = self.get_element_at_position(to_pos)
+        end_nb, end_element = self.get_element_at_position(end_pos)
         from_pos_rel = from_pos - self.element_positions[start_nb]
-        to_pos_rel = to_pos - self.element_positions[end_nb]
+        to_pos_rel = end_pos - self.element_positions[end_nb]
 
         if start_nb == end_nb:
-            start_element.get_two_point_transfer_mx_at_freq(from_pos=from_pos_rel,
-                                                            to_pos=to_pos_rel)
+            mx = start_element.two_point_transfer_mx_at_freq(from_pos=from_pos_rel,
+                                                             to_pos=to_pos_rel,
+                                                             freq=freq)
         else:
-			mx = start_element.get_two_point_transfer_mx_at_freq(from_pos=from_pos_rel)
-			for el in self.elements[start_nbr+1:end_nb]:
-				mx = np.dot(mx, el.get_transfer_mx_at_freq())
-			mx = np.dot(mx,
-                        el.get_two_point_transfer_mx_at_freq(from_pos=0.0,
-                                                             to_pos=to_pos_rel))
+            mx =\
+                start_element.two_point_transfer_mx_at_freq(from_pos=from_pos_rel,
+                                                        freq=freq)
+            for el in self.elements[start_nb+1:end_nb]:
+                mx = np.dot(mx, el.get_transfer_mx_at_freq(freq=freq))
+                mx = np.dot(mx,
+                            el.two_point_transfer_mx_at_freq(from_pos=0.0,
+                                                             to_pos=to_pos_rel,
+                                                             freq=freq))
         return mx
 

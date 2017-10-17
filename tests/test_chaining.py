@@ -1,5 +1,6 @@
 import unittest
 import numpy as np
+import sys
 
 from ImpedanceSynthesiser import *
 
@@ -8,6 +9,27 @@ def freq_vector(f_st = 100, f_end = 10000, n = 1000, log=False):
         return np.logspace(np.log10(f_st),np.log10(f_end),n)
     else:
         return np.linspace(f_st,f_end,n)
+
+def random_duct(n_segments=None, lengths=[], radii=[]):
+    if n_segments is None:
+        n_segments = int(10*np.random.rand())
+
+    duct = Duct()
+    for seg_nbr in range(n_segments):
+        try:
+            l = lengths[seg_nbr]
+        except IndexError:
+            l = np.random.rand()
+        try:
+            r = radii[seg_nbr]
+        except IndexError:
+            r = np.random.rand()
+
+        duct.append_element(StraightDuct(length=l, radius=r))
+
+    duct.set_termination(PerfectOpenEnd())
+
+    return duct
 
 class WorldTests(unittest.TestCase):
     def test_default_world(self):
@@ -188,6 +210,105 @@ class DuctTests(unittest.TestCase):
         
         duct.get_coords()
         
+    def test_chaining_in_single_element(self):
+        sec_len = 1
+        mid_pos=.4
+        rad0 = 1
+        
+        duct = Duct()
+        duct.set_termination(PerfectOpenEnd())
+        this_duct = StraightDuct(length=sec_len,radius=rad0)
+        duct.append_element(this_duct)
+        
+        fvec = freq_vector()
+
+        err_msg = 'Failed at freq {}:\n * tm_c[{},{}] = {},\n   expected {}'
+
+        for f in fvec:
+            tm_all = duct.transfer_mx_at_freq(freq=f)
+            
+            tm1 = duct.transfer_mx_at_freq(freq=f,
+                                           from_pos=0.0,
+                                           to_pos=mid_pos)
+            tm2 = duct.transfer_mx_at_freq(freq=f,
+                                           from_pos=mid_pos)
+            tm_comp = np.dot(tm1, tm2)
+
+
+            for row in range(tm_comp.shape[0]):
+                for col in range(tm_comp.shape[1]):
+                    self.assertAlmostEqual(tm_all[row, col], tm_comp[row, col],
+                                          msg=err_msg.format(f,row,col,
+                                                             tm_comp[row,col],
+                                                             tm_all[row,col]))
+        
+    def test_duct_transfer_mx(self):
+        sec_len = 1
+        mid_pos=.4
+        rad0 = 1
+        
+        duct = Duct()
+        duct.set_termination(PerfectOpenEnd())
+        this_duct = StraightDuct(length=sec_len,radius=rad0)
+        duct.append_element(this_duct)
+
+        fvec = freq_vector()
+
+        err_msg = 'Failed at freq {}:\n * tm_s[{},{}] = {},\n   expected {}'
+
+        for f in fvec:
+            tm_d = duct.transfer_mx_at_freq(freq=f)
+            
+            tm_s = this_duct.transfer_mx_at_freq(freq=f)
+            for row in range(tm_d.shape[0]):
+                for col in range(tm_d.shape[1]):
+                    self.assertAlmostEqual(tm_d[row, col], tm_s[row, col],
+                                           msg=err_msg.format(f, row, col,
+                                                              tm_d[row, col],
+                                                              tm_s[row, col]))
+
+    def test_transfer_mx_in_single_section(self):
+        duct = random_duct(n_segments=1)
+        section = duct.elements[0]
+
+        fvec = freq_vector()
+
+        err_msg = 'Failed at freq {}:\n * tm_s[{},{}] = {},\n   expected {}'
+
+        for f in fvec:
+            tm_d = duct.transfer_mx_at_freq(freq=f)
+            tm_s = section.transfer_mx_at_freq(freq=f)
+            for row in range(tm_d.shape[0]):
+                for col in range(tm_d.shape[1]):
+                    self.assertAlmostEqual(tm_d[row, col], tm_s[row, col],
+                                           msg=err_msg.format(f, row, col,
+                                                              tm_d[row, col],
+                                                              tm_s[row, col]))
+
+    def test_position_out_of_duct(self):
+        duct = random_duct(n_segments=1)
+        total_length = duct.get_total_length()
+        el_nbr, el = duct.get_element_at_position(total_length+1)
+        self.assertIsNone(el)
+        self.assertTrue(np.isnan(el_nbr))
+
+    def test_position_at_edge_of_duct(self):
+
+        duct = random_duct()
+        total_nbr = len(duct.elements)
+        total_length = duct.get_total_length()
+        el_nbr, el = duct.get_element_at_position(total_length)
+        self.assertEqual(el_nbr, total_nbr-1)
+
+    def test_total_length(self):
+        duct = random_duct()
+        total_length = duct.get_total_length()
+        len_sum = 0
+        for el in duct.elements:
+            len_sum += el.get_length()
+
+        self.assertEqual(total_length, len_sum)
+
 
 def main():
     unittest.main()
