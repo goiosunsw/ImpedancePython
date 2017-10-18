@@ -287,8 +287,8 @@ class DuctTests(unittest.TestCase):
                 for col in range(tm_d.shape[1]):
                     self.assertAlmostEqual(tm_d[row, col], tm_s[row, col],
                                            msg=err_msg.format(f, row, col,
-                                                              tm_d[row, col],
-                                                              tm_s[row, col]))
+                                                              tm_s[row, col],
+                                                              tm_d[row, col]))
 
     def test_travelling_mx_in_zero_length(self):
         duct = random_duct()
@@ -389,6 +389,14 @@ class DuctTests(unittest.TestCase):
             len_sum += el.get_length()
 
         self.assertEqual(total_length, len_sum)
+
+    def test_parenting(self):
+        segment = DuctSection()
+        self.assertIsNone(segment.parent)
+        duct = random_duct(n_segments=1)
+        duct.append_element(segment)
+        self.assertIsNotNone(segment.parent)
+
 
 
 def main():
