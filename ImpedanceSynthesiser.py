@@ -385,6 +385,13 @@ class PerfectClosedEnd(TerminationImpedance):
     def _get_reflection_coeff_at_freq(self, freq):
         return 1.
 
+class PerfectAnechoicEnd(TerminationImpedance):
+    '''Ideal open end impedance
+    Load impedance Zl(f) = 0
+    Reflection function R(f) = 1 '''
+    def _get_reflection_coeff_at_freq(self, freq):
+        return 0.
+
 
 class PortImpedance(object):
     '''
