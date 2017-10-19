@@ -165,11 +165,11 @@ class DuctSection(object):
         p_st = tmx[0, 0]*z_end + tmx[0, 1]*1
         u_st = tmx[1, 0]*z_end + tmx[1, 1]*1
 
-        if p_st == np.inf:
-            if u_st != 0.0:
-                return np.inf
+        if np.isinf(p_st):
+            if np.isinf(u_st):
+                return tmx[0, 0] / tmx[1, 0]
             else:
-                raise ZeroDivisionError
+                return np.inf
 
         if u_st != 0.0:
             return p_st/u_st
@@ -400,6 +400,36 @@ class PortImpedance(object):
         '''
         return 0.0
 
+    def plot_impedance(self, ax=None, fmin=0.0, 
+                       fmax=4000.0, npoints=200,
+                       scale_type='db'):
+        if ax is None:
+            newfig = True
+            fig, ax = pl.subplots(2, sharex=True)
+        else:
+            newfig = False
+
+        fvec = np.linspace(fmin, fmax, npoints)
+        zvec = np.array([self.get_input_impedance_at_freq(f) for f in fvec])
+        
+        if scale_type=='db':
+            y = 20*np.log10(np.abs(zvec))
+            ylabel = 'dB re. kg$\cdot$m$^{-4}\cdot$s$^{-1}$'
+        else:
+            y = np.abs(zvec)
+            ylabel = 'kg$\cdot$m$^{-4}\cdot$s$^{-1}$'
+
+        ax[0].plot(fvec, y)
+        if scale_type == 'log' and newfig:
+            ax[0].set_yscale('log')
+        ax[1].plot(fvec, np.angle(zvec))
+        
+        if newfig:
+            ax[0].set_ylabel(ylabel)
+            ax[1].set_ylabel('phase (rad)')
+            ax[1].set_xlabel('Frequency (Hz)')
+        return ax
+
 
 class Duct(PortImpedance):
     '''
@@ -602,3 +632,52 @@ class Duct(PortImpedance):
                                             freq=freq))
         return mx
 
+    def plot_geometry(self, ax=None):
+        if ax is None:
+            newfig = True
+            pl.figure()
+            ax = pl.gca()
+        else:
+            newfig = False
+        x, y = self.get_coords()
+        ln = ax.plot(x, y)
+        ax.plot(x, -np.array(y), color=ln[0].get_color())
+        if newfig:
+            ax.set_xlabel('distance from input (m)')
+            ax.set_ylabel('radial distance (m)')
+
+    def plot_report(self, ax=None, fmin=50.0, 
+                    fmax=2000, npoints=200, scale_type='log'):
+        if ax is None:
+            ax = []
+            fig=pl.figure()
+            # dimensions
+            lmarg = 0.05
+            gwidth = .2
+            gheight = .2
+            chspace = 0
+            cwspace = 0.05
+            zmarg = 0.05
+            zwidth = 0.7
+            zheight = .5-zmarg-chspace/2
+            ax.append(pl.axes([lmarg, .5-gheight/2,
+                               gwidth, gheight]))
+            ax.append(pl.axes([lmarg+gwidth+cwspace,
+                               .5+chspace/2, zwidth, zheight]))
+            ax.append(pl.axes([lmarg+gwidth+cwspace, zmarg, zwidth,
+                               .5-zmarg-chspace/2], sharex=ax[-1]))
+        self.plot_geometry(ax[0])
+        ax[0].set_xlabel('distance from input (m)')
+        ax[0].set_ylabel('radial distance (m)')
+
+        self.plot_impedance(ax[1:], fmin=fmin, 
+                            fmax=fmax, npoints=npoints,
+                            scale_type=scale_type)
+        ylabel = 'kg$\cdot$m$^{-4}\cdot$s$^{-1}$'
+        ax[1].set_ylabel(ylabel)
+        if scale_type == 'log':
+            ax[1].set_yscale('log')
+        ax[2].set_ylabel('phase (rad)')
+        ax[2].set_xlabel('Frequency (Hz)')
+
+        return ax
