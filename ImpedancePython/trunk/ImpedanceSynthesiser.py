@@ -29,10 +29,10 @@ def water_vapour_pressure(temperature=25., humidity=0.5):
     return saturation_pressure * humidity
 
 def calc_params(temperature=25., humidity=0.5, ambient_pressure=101325.):
-    '''Recalculates physical parameters based on ambient values of:
+    """Recalculates physical parameters based on ambient values of:
     * temperature (in C)
     * humidity (in fraction i.e. 0.5 rather than 50%)
-    * ambient_pressure (in Pa)'''
+    * ambient_pressure (in Pa)"""
 
     global phys_params
     global constants
@@ -55,30 +55,63 @@ def calc_params(temperature=25., humidity=0.5, ambient_pressure=101325.):
                                          + 1.24 * humidity
 
 
-def transfer_to_travelling_mx(transfer, char_impedance=1.0):
-    transfer[0, 1] /= char_impedance
-    transfer[1, 0] *= char_impedance
+#def transfer_to_travelling_mx(transfer, char_impedance=1.0):
+#    transfer[0, 1] /= char_impedance
+#    transfer[1, 0] *= char_impedance
+#
+#    travelling = np.ones((2, 2), dtype='complex128')
+#    travelling[0, 0] = np.sum(transfer)/2
+#    travelling[0, 1] = -np.diff(np.sum(transfer, axis=0))[0]/2
+#    travelling[1, 0] = -np.diff(np.sum(transfer, axis=1))[0]/2
+#    travelling[1, 1] = (np.sum(np.diag(transfer)) -
+#                        np.sum(np.diag(np.flipud(transfer))))/2
+#    return travelling
+#
 
-    travelling = np.ones((2, 2), dtype='complex128')
-    travelling[0, 0] = np.sum(transfer)/2
-    travelling[0, 1] = -np.diff(np.sum(transfer, axis=0))[0]/2
-    travelling[1, 0] = -np.diff(np.sum(transfer, axis=1))[0]/2
-    travelling[1, 1] = (np.sum(np.diag(transfer)) -
-                        np.sum(np.diag(np.flipud(transfer))))/2
-    return travelling
+def transfer_to_travelling_conversion_mx():
+    """
+    Returns the matrix C used to convert 
+    normalized travelling wave variables [p_out, p_in]
+    to normalized acoustics variables [p, Zc u]
+
+      [p, Zc U] = M [p_out, p_in]
+
+    where:
+        * p: acoustic pressure
+        * u: acoustic flow
+        * p_out: outgoing pressure wave
+        * p_in : incoming pressure wave
+    """
+    return np.array([[1, 1], [1, -1]])
+
+
+def transfer_to_travelling_mx(transfer, char_impedance=1.0):
+    """
+    Convert a transfer matrix M to a travelling wave matrix T
+
+    Note: 
+        M: [p2, Zc u2] = M [p1, Zc u1]
+        T: [p_out_2, p_in_2] = T [p_out_1, p_in_1]
+    """ 
+    # transfer_to_travelling conversion matrix
+    ttm = transfer_to_travelling_conversion_mx()
+    ttmi = np.linalg.inv(ttm)
+    trav = np.dot(transfer, ttmi)
+    trav = np.dot(ttm, transfer)
+    return trav
 
 class AcousticWorld(object):
-    '''
-    Set of acoustic constant to be used in a synthesised impedance
-    '''
+    """
+    Set of acoustic constants to be used in a synthesised impedance
+    """
     def __init__(self,temp=25., humid= 0.5, press = 101325.):
-        '''
+        """
         Set a new acoustic world object:
 
         temp: temperature in deg C
         humid: relative humidity
         press: ambient pressure in Pa
-        '''
+        """
         self.temperature = temp
         self.humidity = humid
         self.pressure = press
@@ -90,6 +123,10 @@ class AcousticWorld(object):
         self._recalc()
 
     def _recalc(self):
+        """
+        recalculate derived quantities when defining new
+        temperature, pressure or humidity
+        """
         self.speed_of_sound = 331.3 * np.sqrt(1 + self.temperature/
                                               constants['celsius_to_kelvin']) \
                                     + 1.24 * self.humidity
@@ -125,13 +162,13 @@ class AcousticWorld(object):
 
 
 class DuctSection(object):
-    '''Any section connecting to another section in either end'''
+    """Any section connecting to another section in either end"""
     def __init__(self):
-        '''Initialise a generic middle section portion
+        """Initialise a generic middle section portion
 
         Default is a section that does not change presure and flow
         (0-length cylinder)
-        '''
+        """
         self.length = 0.0
         self.char_impedance = 1.
         self.normalized_impedance = 1.0
@@ -139,12 +176,17 @@ class DuctSection(object):
         self.parent = None
 
     def get_length(self):
+        """
+        returns the length of this duct section
+        """
         return self.length
 
     def _chain_reflection_coeff_at_freq(self, r_in, freq):
-        '''Calculate reflection coefficient at beginning of section,
+        """
+        Calculate reflection coefficient at beginning of section,
         when section is chained to a termination
-        with reflection coeff r_in'''
+        with reflection coeff r_in
+        """
 
         tmx = self.travelling_mx_at_freq(freq)
 
@@ -153,12 +195,17 @@ class DuctSection(object):
 
         return p_in/p_out
 
-    def _chain_impedance_at_freq(self, z_end, freq):
-        '''Calculate impedance at beginning of section,
+    def _chain_impedance_at_freq(self, z_end, freq, 
+                                 from_pos=0.0, to_pos=None):
+        """
+        Calculate impedance at beginning of section,
         when section is chained to a termination
-        with impedance z_end'''
+        with impedance z_end
+        """
 
-        tmx = self.normalized_transfer_mx_at_freq(freq)
+        tmx = self.normalized_two_point_transfer_mx_at_freq(freq, 
+                                                            from_pos=from_pos,
+                                                            to_pos=to_pos)
 
         # p_st = tmx[0, 0]*z_end + tmx[0, 1]*1
         # u_st = tmx[1, 0]*z_end + tmx[1, 1]*1
@@ -177,39 +224,65 @@ class DuctSection(object):
             return np.inf
 
     def get_characteristic_impedance(self):
+        """
+        returns the characteristic impedance of this duct section
+        (kg.m-4.s-1)
+        """
         return self.char_impedance
 
-    def travelling_mx_at_freq(self, freq=0.0):
-        ''' return the transfer matrix of the section
+    def travelling_mx_at_freq(self, freq=0.0, position=0):
+        """ 
+        return the transfer matrix of the section
         at a given frequency value:
-           relates [P+,P-] at each end'''
-
-
+         relates [p_out,p_in] at each end
+        """
         return np.array([[1, 0], [0, 1]])
 
-    def normalized_transfer_mx_at_freq(self, freq=0.0):
-        ''' return the transfer matrix of the section
+    def normalized_two_point_transfer_mx_at_freq(self, freq=0.0, 
+                                                 from_pos=0.0, 
+                                                 to_pos=None):
+        """ 
+        return the transfer matrix of the section
         at a given frequency value:
-           relates [P,U] at each end'''
+           relates [P, Zc U] at each end
+        """
 
         return np.array([[1, 0], [0, 1]])
 
     def _recalc(self):
+        """ 
+        recalculates internal variables in this section
+        """
         pass
 
     def get_speed_of_sound(self):
+        """ 
+        returns the speed of sound associated to this duct
+        """
         if self.parent:
             return self.parent.speed_of_sound
         else:
             return AcousticWorld().speed_of_sound
 
     def get_medium_density(self):
+        """ 
+        returns the density of the medium associated to 
+        this duct section
+        """
         if self.parent:
             return self.parent.medium_density
         else:
             return AcousticWorld().medium_density
 
     def get_boundary_layer_constants(self):
+        """ 
+        returns the two boudary layer constants rv and rt
+        
+        rv, rt = get_boundary_layer_constants()
+
+        rv: viscous constant
+        rt: thermal constant
+        """
         if self.parent:
             world = self.parent.world
 
@@ -219,12 +292,29 @@ class DuctSection(object):
             world.thermal_boundary_layer_const
 
     def set_parent(self, parent):
+        """ 
+        set the parent duct container
+
+        (should be a member of Duct class)
+        """
+        assert isinstance(parent, Duct)
+
         self.parent = parent
         self._recalc()
 
 
 class StraightDuct(DuctSection):
+    """ 
+    Straight section of a duct
+    """
     def __init__(self, length=0.5, radius=0.1):
+        """ 
+        create a straight section
+
+        parameters:
+            * length (m)
+            * radius (m)
+        """
         super(StraightDuct, self).__init__()
         self.radius = radius
         self.length = length
@@ -233,6 +323,13 @@ class StraightDuct(DuctSection):
         self.gamma = 1.4
 
     def _reset_impedance(self):
+        """
+        recalculate the characteristic impedance of the 
+        straight duct based on the geometrical dimentions:
+
+            Zc = rho * c / S
+            S = pi * r^2
+        """
         self.cross_section = np.pi*self.get_input_radius()**2
         self.char_impedance = self.get_characteristic_impedance()
         if self.parent:
@@ -244,10 +341,15 @@ class StraightDuct(DuctSection):
             self.normalized_impedance
 
     def _recalc(self):
-        self._reset_impedance()
-        # self.cross_section = np.pi*self.get_input_radius()**2
-        rvc_per_rad, rtc_per_rad = self.get_boundary_layer_constants()
-        self.rv_const = rvc_per_rad * self.radius
+        """
+        recalculate internal variables:
+            * characteristic impedance
+            * boundary layer coefficients
+        """
+        self._ImpedanceSynthesiser.py
+        # self.cyournametion = np.pi*self.get_input_radius()**2
+        rvc_peryourname@email.com= self.get_boundary_layer_constants()
+        self.rv_https://github.com/yournameradius
         self.rt_const = rtc_per_rad * self.radius
         if self.parent:
             self.losses = self.parent.losses
@@ -255,15 +357,31 @@ class StraightDuct(DuctSection):
             self.losses = True
 
     def get_propagation_coefficient(self, freq):
+        """
+        returns the propagation coefficient at given frequency
+
+        the propagation coefficient is the equivalent of "k"
+        as in exp(j k l))
+
+        it includes a real part, close to omega/c
+        and a positive imaginary part, corresponding to distributed
+        losses
+        """
         if not self.losses:
             return 2*np.pi*freq/self.get_speed_of_sound()
         else:
             return self._propagation_coeff(freq)
 
     def get_radius_at_position(self, position=0.0):
+        """
+        return the radius of the element at a given position (in m)
+        """
         return self.get_input_radius()
 
     def _propagation_coeff(self, freq):
+        """
+        calcualtion of the propagation coefficient at given frequency
+        """
         c = self.get_speed_of_sound()
         rho = self.get_medium_density()
 
@@ -284,19 +402,44 @@ class StraightDuct(DuctSection):
         # characteristic impedance
         # Zeta    = np.sqrt(Zv/Yt)/s
 
-        return -1j*G
+        return ((G)/1j)
 
     def get_input_radius(self):
+        """
+        return the input radius of the duct
+        (same as DuctSection.get_radius_at_position(0.0))
+        """
         return self.radius
 
     def get_output_radius(self):
+        """
+        return the output radius of the duct
+        (same as DuctSection.get_radius_at_position(
+            DuctSection.get_length()))
+        """
         return self.radius
 
     def travelling_mx_at_freq(self, freq=0.0):
+        """
+        return the travelling wave matrix T of the complete
+        duct section.
+
+        [p_out, p_in]_end = T [p_out, p_in]_start
+
+        same as StraightDuct.normalized_two_point_transfer_mx_at_freq(
+                    freq=freq, start_pos=0,
+                    end_pos=StraightDuct.get_length())
+        """
         return self.two_point_travelling_mx_at_freq(freq=freq)
 
     def two_point_travelling_mx_at_freq(self, freq=0.0,
                                         from_pos=0.0, to_pos=None):
+        """
+        return the travelling wave matrix T of the 
+        duct section between from_pos to end_pos.
+
+        [p_out, p_in]_from_pos = T [p_out, p_in]_to_pos
+        """
 
         if to_pos is None:
             to_pos = self.get_length()
@@ -313,18 +456,36 @@ class StraightDuct(DuctSection):
                          [0, np.exp(-1j*phase)]])
 
     def transfer_mx_at_freq(self, freq=0.0):
+        """
+        return the transfer matrix M of the 
+        duct section between the two edges of the section.
+
+        [p, u]_end = M [p, u]_start
+        """
         mx = self.normalized_two_point_transfer_mx_at_freq(freq=freq)
         mx[0, 1] *= self.impedance_multiplier
         mx[1, 0] /= self.impedance_multiplier
         return mx
 
     def normalized_transfer_mx_at_freq(self, freq=0.0):
+        """
+        return the normalized transfer matrix M of the 
+        duct section between the two edges pf the section.
+
+        [p, Zc u]_end = M [p, Zc u]_start
+        """
         return self.normalized_two_point_transfer_mx_at_freq(freq=freq)
 
     def normalized_two_point_transfer_mx_at_freq(self, freq=0.0,
                                                  from_pos=0.0, 
                                                  to_pos=None):
 
+        """
+        return the normalized transfer matrix M of the 
+        duct section between from_pos to end_pos.
+
+        [p, Zc u]_from_pos = M [p, Zc u]_to_pos
+        """
         if to_pos is None:
             to_pos = self.get_length()
 
@@ -334,36 +495,55 @@ class StraightDuct(DuctSection):
         phase = prop_coeff*distance
 
         return np.array([[np.cos(phase),
-                          1j*self.normalized_impedance*np.sin(phase)],
-                         [1j/self.normalized_impedance*np.sin(phase),
+                          -1j*self.normalized_impedance*np.sin(phase)],
+                         [-1j/self.normalized_impedance*np.sin(phase),
                           np.cos(phase)]])
 
     def get_characteristic_impedance(self):
+        """
+        return the characteristic impedance of the duct section
+        """
         return self.get_medium_density() *\
             self.get_speed_of_sound() /\
             self.cross_section
 
 
 class TerminationImpedance(DuctSection):
-    '''Base class for a termination impedance
-    default is an open termination'''
+    """Base class for a termination impedance
+    default is an open termination"""
     def __init__(self):
         self.__call__ = np.vectorize(self._get_impedance_at_freq)
 
-    def __call__(self, f):
+    def __call__(self, freq):
+        """
+        return the value of the impedance at the given frequency
+        """
         return f
 
     def _get_reflection_coeff_at_freq(self, freq):
+        """
+        returns the value of the reflection coefficient (complex)
+        at a given frequency
+        """
         return -1.
 
-    def _get_impedance_at_freq(self, f):
-        r = self._get_reflection_coeff_at_freq(f)
+    def _get_impedance_at_freq(self, freq):
+        """
+        return the value of the impedance (complex)
+        at given frequency
+        """
+        r = self._get_reflection_coeff_at_freq(freq)
         if r != 1.0:
             return (1.+r)/(1.-r)
         else:
             return np.inf
 
     def plot_impedance(self, fig=None, fmin=0.0, fmax=4000.0, npoints=200):
+        """
+        plot the impedance as a function of frequency
+
+        returns figure, axis
+        """
         if not fig:
             fig, ax = pl.subplots(2, sharex=True)
         fvec = np.linspace(fmin, fmax, npoints)
@@ -375,41 +555,59 @@ class TerminationImpedance(DuctSection):
 
 
 class PerfectOpenEnd(TerminationImpedance):
+    """
+    a perfect open end, imposing 
+        * p=0
+        * r=-1
+        * z=0
+    at any given frequency
+    """
     pass
 
 
 class PerfectClosedEnd(TerminationImpedance):
-    '''Ideal open end impedance
-    Load impedance Zl(f) = 0
-    Reflection function R(f) = 1 '''
+    """
+    a perfect closed end, imposing 
+        * u=0
+        * r=1
+        * z=infinity
+    at any given frequency
+    """
     def _get_reflection_coeff_at_freq(self, freq):
         return 1.
 
 class PerfectAnechoicEnd(TerminationImpedance):
-    '''Ideal open end impedance
+    """
+    Ideal open end impedance
     Load impedance Zl(f) = 0
-    Reflection function R(f) = 1 '''
+    Reflection function R(f) = 1
+    """
     def _get_reflection_coeff_at_freq(self, freq):
         return 0.
 
 
 class PortImpedance(object):
-    '''
+    """
     Main functionality for an object with an input port
-    '''
+    """
 
     def __init__(self):
         pass
 
-    def get_input_impedance_at_freq(self, f):
-        '''
+    def get_input_impedance_at_freq(self, freq):
+        """
         Retrieve the input impedance at a particular value of frequency
-        '''
+        """
         return 0.0
 
     def plot_impedance(self, ax=None, fmin=0.0, 
                        fmax=4000.0, npoints=200,
                        scale_type='db'):
+        """
+        plot the impedance as a function of frequency
+
+        returns axis (list)
+        """
         if ax is None:
             newfig = True
             fig, ax = pl.subplots(2, sharex=True)
@@ -439,9 +637,9 @@ class PortImpedance(object):
 
 
 class Duct(PortImpedance):
-    '''
+    """
     1-D duct object containing linear elements
-    '''
+    """
     def __init__(self, world=None, losses=True):
         if not world:
             world = AcousticWorld()
@@ -495,10 +693,16 @@ class Duct(PortImpedance):
             r = el._chain_reflection_coeff_at_freq(r, f)
         return r
 
-    def get_input_impedance_at_freq(self, f):
+    def get_input_impedance_at_freq(self, f, from_pos=0.0):
+        el_nbr, el = self.get_element_at_position(from_pos)
         z = self.termination._get_impedance_at_freq(f)
-        for el in reversed(self.elements):
-            z = el._chain_impedance_at_freq(z, f)
+        elements = reversed(self.elements[el_nbr+1:])
+        for el in elements:
+            z = el._chain_impedance_at_freq(z, f, from_pos=0.0)
+        el = self.elements[el_nbr]
+        rel_pos = from_pos - self.element_positions[el_nbr]
+        z = el._chain_impedance_at_freq(z, f, from_pos=rel_pos)
+
         return z*self.char_impedance
 
     def get_coords(self):
@@ -515,6 +719,16 @@ class Duct(PortImpedance):
         return x, y
 
     def get_element_at_position(self, position=0.0):
+        """
+        returns the duct element at a given position 
+        along this duct
+
+        returns: element_number, element
+
+        element_number can be used to obtain:
+            * the element, from Duct.elements[element_number]
+            * its starting position, Duct.element_positions[element_number]
+        """
         pos_el = zip(self.element_positions, self.elements)
         for order, (pos, el) in enumerate(pos_el):
             if pos+el.get_length() >= position:
@@ -523,12 +737,19 @@ class Duct(PortImpedance):
         return np.nan, None
 
     def get_radius_at_position(self, position=0.0):
+        """
+        return the radius of the duct at a given position 
+        (in meters)
+        """
         el_nbr, el = self.get_element_at_position(position=position)
         relative_pos = position - self.element_positions[el_nbr]
         el_rad = el.get_radius_at_position(relative_pos)
         return el_rad
 
     def get_total_length(self):
+        """
+        returns the total length of the duct (sum of elements)
+        """
         return (self.element_positions[-1] + self.elements[-1].get_length())
 
     def normalized_transfer_mx_at_freq(self, freq=0.0,
@@ -536,15 +757,18 @@ class Duct(PortImpedance):
         """ Returns the pressure/ flow transfer matrix between
         two positions of the duct
 
-        transfer_mx_at_freq(from_pos=0.0, to_pos=0.0)
+        transfer_mx_at_freq(from_pos=0.0, to_pos=length)
+
+        default to_pos = Duct.get_length()
+
         arguments:
             from_pos: position of source from upstream
             to_pos: position of source from upstream
             (negative position means relative to downstream)
 
         returns:
-            2x2 matrix T such that:
-                [pi, ui] = [t11,t12; t21, t22] [po, uo]
+            2x2 matrix M such that:
+                [p, Zc u]_from = [m11,m12; m21, m22] [p, Zc u]_to
         """
 
     # sys.stderr.write('{}\n'.format(to_pos))
@@ -578,6 +802,22 @@ class Duct(PortImpedance):
         return mx
 
     def transfer_mx_at_freq(self, freq=0.0, from_pos=0.0, to_pos=None):
+        """ Returns the pressure/ flow transfer matrix between
+        two positions of the duct
+
+        transfer_mx_at_freq(from_pos=0.0, to_pos=length)
+
+        default to_pos = Duct.get_length()
+
+        arguments:
+            from_pos: position of source from upstream
+            to_pos: position of source from upstream
+            (negative position means relative to downstream)
+
+        returns:
+            2x2 matrix M such that:
+                [p, u]_from = [m11,m12; m21, m22] [p, u]_to
+        """
         mx = self.normalized_transfer_mx_at_freq(freq=freq,
                                                  from_pos=from_pos,
                                                  to_pos=to_pos)
@@ -592,7 +832,7 @@ class Duct(PortImpedance):
         """ Returns the travelling pressure transfer matrix between
         two positions of the duct
 
-        transfer_mx_at_freq(from_pos=0.0, to_pos=0.0)
+        transfer_mx_at_freq(from_pos=0.0, to_pos=length)
         arguments:
             from_pos: position of source from upstream
             to_pos: position of source from upstream
@@ -600,13 +840,13 @@ class Duct(PortImpedance):
 
         returns:
             2x2 matrix T such that:
-                [po1, pi1] = [t11,t12; t21, t22] [po2, pi2]
-                (poX is the outgoing pressure wave at the "from" pos
-                 piX the corresponding incoming wave)
+                [po, pi]_to = [t11,t12; t21, t22] [po, pi]_from
+                (po is the outgoing pressure wave at each position
+                 pi the corresponding incoming wave)
         """
         transf = self.normalized_transfer_mx_at_freq(freq=freq,
-                                                    from_pos=from_pos,
-                                                    to_pos=to_pos)
+                                                     from_pos=from_pos,
+                                                     to_pos=to_pos)
         return transfer_to_travelling_mx(transf,
                                          char_impedance=1.0)#self.char_impedance)
 
@@ -640,6 +880,11 @@ class Duct(PortImpedance):
         return mx
 
     def plot_geometry(self, ax=None):
+        """
+        plot a transverse section of the duct
+
+        return the axis
+        """
         if ax is None:
             newfig = True
             pl.figure()
@@ -652,9 +897,15 @@ class Duct(PortImpedance):
         if newfig:
             ax.set_xlabel('distance from input (m)')
             ax.set_ylabel('radial distance (m)')
+        return ax
 
     def plot_report(self, ax=None, fmin=50.0, 
                     fmax=2000, npoints=200, scale_type='log'):
+        """
+        plot a figure with geometry and impedance
+
+        return a list of axes handles
+        """
         if ax is None:
             ax = []
             fig=pl.figure()
