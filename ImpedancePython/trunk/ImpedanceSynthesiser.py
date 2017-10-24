@@ -346,10 +346,11 @@ class StraightDuct(DuctSection):
             * characteristic impedance
             * boundary layer coefficients
         """
-        self._ImpedanceSynthesiser.py
-        # self.cyournametion = np.pi*self.get_input_radius()**2
-        rvc_peryourname@email.com= self.get_boundary_layer_constants()
-        self.rv_https://github.com/yournameradius
+
+        self._reset_impedance()
+        # self.cross_section = np.pi*self.get_input_radius()**2
+        rvc_per_rad, rtc_per_rad = self.get_boundary_layer_constants()
+        self.rv_const = rvc_per_rad * self.radius
         self.rt_const = rtc_per_rad * self.radius
         if self.parent:
             self.losses = self.parent.losses
