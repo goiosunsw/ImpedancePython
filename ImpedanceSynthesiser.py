@@ -196,7 +196,8 @@ class DuctSection(object):
         return p_in/p_out
 
     def _chain_impedance_at_freq(self, z_end, freq, 
-                                 from_pos=0.0, to_pos=None):
+                                 from_pos=0.0, to_pos=None,
+                                 reverse=False):
         """
         Calculate impedance at beginning of section,
         when section is chained to a termination
@@ -205,7 +206,8 @@ class DuctSection(object):
 
         tmx = self.normalized_two_point_transfer_mx_at_freq(freq, 
                                                             from_pos=from_pos,
-                                                            to_pos=to_pos)
+                                                            to_pos=to_pos, 
+                                                            reverse=reverse)
 
         # p_st = tmx[0, 0]*z_end + tmx[0, 1]*1
         # u_st = tmx[1, 0]*z_end + tmx[1, 1]*1
@@ -240,7 +242,8 @@ class DuctSection(object):
 
     def normalized_two_point_transfer_mx_at_freq(self, freq=0.0, 
                                                  from_pos=0.0, 
-                                                 to_pos=None):
+                                                 to_pos=None,
+                                                 reverse=False):
         """ 
         return the transfer matrix of the section
         at a given frequency value:
@@ -479,7 +482,8 @@ class StraightDuct(DuctSection):
 
     def normalized_two_point_transfer_mx_at_freq(self, freq=0.0,
                                                  from_pos=0.0, 
-                                                 to_pos=None):
+                                                 to_pos=None,
+                                                 reverse=False):
 
         """
         return the normalized transfer matrix M of the 
@@ -491,13 +495,15 @@ class StraightDuct(DuctSection):
             to_pos = self.get_length()
 
         distance = to_pos-from_pos
+        if reverse:
+            distance = -distance
 
         prop_coeff = self.get_propagation_coefficient(freq)
-        phase = prop_coeff*distance
+        phase = -prop_coeff*distance
 
         return np.array([[np.cos(phase),
-                          -1j*self.normalized_impedance*np.sin(phase)],
-                         [-1j/self.normalized_impedance*np.sin(phase),
+                          1j*self.normalized_impedance*np.sin(phase)],
+                         [1j/self.normalized_impedance*np.sin(phase),
                           np.cos(phase)]])
 
     def get_characteristic_impedance(self):
@@ -601,7 +607,7 @@ class PortImpedance(object):
         """
         return 0.0
 
-    def plot_impedance(self, ax=None, fmin=0.0, 
+    def plot_impedance(self, ax=None, fmin=1.0, 
                        fmax=4000.0, npoints=200,
                        scale_type='db'):
         """
@@ -697,12 +703,14 @@ class Duct(PortImpedance):
     def get_input_impedance_at_freq(self, f, from_pos=0.0):
         el_nbr, el = self.get_element_at_position(from_pos)
         z = self.termination._get_impedance_at_freq(f)
+        # elements are chained in reverse from termination
         elements = reversed(self.elements[el_nbr+1:])
         for el in elements:
-            z = el._chain_impedance_at_freq(z, f, from_pos=0.0)
+            # transfer matrices also need to be reversed!
+            z = el._chain_impedance_at_freq(z, f, to_pos=0.0, reverse=True)
         el = self.elements[el_nbr]
         rel_pos = from_pos - self.element_positions[el_nbr]
-        z = el._chain_impedance_at_freq(z, f, from_pos=rel_pos)
+        z = el._chain_impedance_at_freq(z, f, from_pos=rel_pos, reverse=True)
 
         return z*self.char_impedance
 
@@ -721,7 +729,7 @@ class Duct(PortImpedance):
 
     def get_element_at_position(self, position=0.0):
         """
-        returns the duct element at a given position 
+        returns the duct element at a given position
         along this duct
 
         returns: element_number, element
@@ -739,7 +747,7 @@ class Duct(PortImpedance):
 
     def get_radius_at_position(self, position=0.0):
         """
-        return the radius of the duct at a given position 
+        return the radius of the duct at a given position
         (in meters)
         """
         el_nbr, el = self.get_element_at_position(position=position)
@@ -754,7 +762,7 @@ class Duct(PortImpedance):
         return (self.element_positions[-1] + self.elements[-1].get_length())
 
     def normalized_transfer_mx_at_freq(self, freq=0.0,
-                            from_pos=0.0, to_pos=None):
+                                       from_pos=0.0, to_pos=None):
         """ Returns the pressure/ flow transfer matrix between
         two positions of the duct
 
