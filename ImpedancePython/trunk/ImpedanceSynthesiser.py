@@ -11,8 +11,6 @@ import numpy as np
 import sys
 import matplotlib.pyplot as pl
 
-
-
 phys_params = {'speed_of_sound': 343.2,
                'medium_density': 1.2}
 
@@ -23,10 +21,13 @@ constants = {'dry_air_molar_mass': 0.02897,   # kg/mol
              'vapour_gas_constant': 461.495,
              'celsius_to_kelvin': 273.15}
 
+
 def water_vapour_pressure(temperature=25., humidity=0.5):
-    saturation_pressure = 6.1078 * 10.**(7.5*temperature/(temperature+
-                                                          constants['celsius_to_kelvin']))
+    saturation_pressure = 6.1078 * 10.**(7.5 * temperature /
+                                         (temperature +
+                                          constants['celsius_to_kelvin']))
     return saturation_pressure * humidity
+
 
 def calc_params(temperature=25., humidity=0.5, ambient_pressure=101325.):
     """Recalculates physical parameters based on ambient values of:
@@ -51,7 +52,8 @@ def calc_params(temperature=25., humidity=0.5, ambient_pressure=101325.):
     # simplistic, for now... (Wikipedia)
     #molar_ratio =  (1-humidity) + humidity * constants['water_molar_mass'] / constants['dry_air_molar_mass']
     #phys_param['speed_of_sound'] = (331.3 + 0.606 * temperature) / np.sqrt(molar_ratio)
-    phys_param['speed_of_sound'] = 331.3 + np.sqrt(1 + temperature/ constants['celsius_to_kelvin']) \
+    phys_param['speed_of_sound'] = 331.3 + np.sqrt(1 + temperature/
+                                                   constants['celsius_to_kelvin']) \
                                          + 1.24 * humidity
 
 
@@ -100,11 +102,12 @@ def transfer_to_travelling_mx(transfer, char_impedance=1.0):
     trav = np.dot(ttm, transfer)
     return trav
 
+
 class AcousticWorld(object):
     """
     Set of acoustic constants to be used in a synthesised impedance
     """
-    def __init__(self,temp=25., humid= 0.5, press = 101325.):
+    def __init__(self, temp=25., humid= 0.5, press = 101325.):
         """
         Set a new acoustic world object:
 
@@ -116,9 +119,8 @@ class AcousticWorld(object):
         self.humidity = humid
         self.pressure = press
 
-
-        #self.speed_of_sound = 343.2
-        #self.medium_density =  1.2
+        # self.speed_of_sound = 343.2
+        # self.medium_density =  1.2
 
         self._recalc()
 
