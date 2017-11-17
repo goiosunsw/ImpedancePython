@@ -3,7 +3,7 @@ import numpy as np
 import sys
 
 from ImpedanceSynthesiser import *
-
+from Impedance import Impedance
 
 def freq_vector(f_st = 100, f_end = 10000, n = 50, log=False):
     if log:
@@ -397,7 +397,11 @@ class DuctTests(unittest.TestCase):
         duct.append_element(segment)
         self.assertIsNotNone(segment.parent)
 
-
+    def test_impedance_object(self):
+        duct=random_duct(n_segments=2)
+        io = duct.get_input_impedance()
+        self.assertIsInstance(io, Impedance)
+        
 
 def main():
     unittest.main()
