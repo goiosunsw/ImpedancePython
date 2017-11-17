@@ -10,6 +10,7 @@ Uses global parameters contained in phys_params
 import numpy as np
 import sys
 import matplotlib.pyplot as pl
+import Impedance as imp
 
 phys_params = {'speed_of_sound': 343.2,
                'medium_density': 1.2}
@@ -608,6 +609,21 @@ class PortImpedance(object):
         Retrieve the input impedance at a particular value of frequency
         """
         return 0.0
+
+    def get_input_impedance(self, fmin=50., fmax=5000., fstep=2., fvec=None):
+        """
+        Get an impedance object.
+
+        either supply a frequency vector in fvec
+        or frequency ranges as fmin:fstep:fmax
+        """
+
+        if fvec is None:
+            fvec = np.arange(fmin,fmax,fstep)
+
+        z = np.array([self.get_input_impedance_at_freq(f) 
+                      for f in fvec])
+        return imp.Impedance(freq=fvec, imped=z)
 
     def plot_impedance(self, ax=None, fmin=1.0, 
                        fmax=4000.0, npoints=200,
