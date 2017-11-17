@@ -22,7 +22,7 @@ class Impedance(object):
     """
     Impedance object containing impedance at a set of frequencies
     """
-
+    
     def __init__(self, freq=None, imped=None):
         if imped is not None:
             self.imped = imped
@@ -30,7 +30,9 @@ class Impedance(object):
             self.imped = np.array([])
 
         if freq is not None:
-            assert freq.shape == self.imped.shape
+            assert len(freq) == len(self.imped), \
+                    "Frequency (%s) and impedance (%s) are not same size" % (
+                        freq.shape, self.imped.shape)
             self.freq = freq
         else:
             self.freq = np.linspace(0,0.5,len(self.imped))
