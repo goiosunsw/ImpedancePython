@@ -132,10 +132,10 @@ class ImpedanceMeasurement(object):
         parentdir = os.path.abspath(os.path.join(curdir, os.pardir))
 
         try:
-            dirlist = os.listdir(parentdir)
+            dirlist = os.listdir(curdir)
             fidx = [string.find(xx, 'param') != -1
                     for xx in dirlist].index(True)
-            return os.path.join(parentdir, dirlist[fidx])
+            return os.path.join(curdir, dirlist[fidx])
         except ValueError:
             try:
                 dirlist = os.listdir(parentdir)
@@ -148,8 +148,12 @@ class ImpedanceMeasurement(object):
 
     def readParams(self, paramfile):
         pp = matlab.loadmat(paramfile)
-        freqLo = pp['PARAMS']['freqLo'][0, 0][0, 0]
-        freqHi = pp['PARAMS']['freqHi'][0, 0][0, 0]
-        freqIncr = pp['PARAMS']['freqIncr'][0, 0][0, 0]
+        try:
+            ppp = pp['PARAMS']
+        except KeyError:
+            ppp = pp
+        freqLo = np.squeeze(ppp['freqLo'])
+        freqHi = np.squeeze(ppp['freqHi'])
+        freqIncr = np.squeeze(ppp['freqIncr'])
 
         self.buildFreqVect(freqLo, freqIncr)
