@@ -133,13 +133,13 @@ class ImpedanceMeasurement(object):
 
         try:
             dirlist = os.listdir(curdir)
-            fidx = [string.find(xx, 'param') != -1
+            fidx = [xx.find('param') != -1
                     for xx in dirlist].index(True)
             return os.path.join(curdir, dirlist[fidx])
         except ValueError:
             try:
                 dirlist = os.listdir(parentdir)
-                fidx = [string.find(xx, 'param') != -1
+                fidx = [xx.find('param') != -1
                         for xx in dirlist].index(True)
                 return os.path.join(parentdir, dirlist[fidx])
             except ValueError:
