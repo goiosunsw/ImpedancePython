@@ -906,8 +906,8 @@ class Duct(PortImpedance):
                                             freq=freq))
         return mx
 
-    def pressure_transfer_func(self, freq=1.0, from_pos=0.0
-                              to_pos=None):
+    def pressure_transfer_func(self, freq=1.0, from_pos=0.0,
+                               to_pos=None):
         """
         get the ratios of pressures at two positions in the duct
         """
@@ -917,13 +917,13 @@ class Duct(PortImpedance):
             end_pos = total_length
         else:
             end_pos = to_pos
-        cmx1 = duct.transfer_mx_at_freq(freq, from_pos=from_pos,
+        cmx1 = self.transfer_mx_at_freq(freq, from_pos=from_pos,
                                         to_pos=total_length)
-        cmx2 = duct.transfer_mx_at_freq(f, from_pos=end_pos,
+        cmx2 = self.transfer_mx_at_freq(freq, from_pos=end_pos,
                                         to_pos=total_length)
-        calmx_inv = np.array([cmx1[0,:], cmx2[0,:]]))
-        z0 = (duct.get_input_impedance_at_freq(f, from_pos=l))
-        
+        calmx_inv = np.array([cmx1[0,:], cmx2[0,:]])
+        z0 = (self.get_input_impedance_at_freq(f, from_pos=l))
+
         tfp = (calmx_inv[1,0]*z0th+calmx_inv[1,1]) \
               (calmx_inv[0,0]*z0th+calmx_inv[0,1])
         return tfp
