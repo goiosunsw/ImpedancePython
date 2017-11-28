@@ -93,21 +93,20 @@ class Calibration(object):
     corresponding measurements
     """
 
-    def __init__(self):
-        self.theoretical_loads = []
-        self.load_measurements = []
-        self.sensor_positions = []
+    def __init__(self, load_model, measurement=None, sensor_set=None):
+        """
+        define a new calibration, based on:
+        * a sensor set (or None, use Calibration.set_sensor_positions)
+        * a load_model (DuctImpedance object)
+        * a set of measurements (set of arrays size (n_samples*n_sensors)
+        """
+        self.load_model = load_model
+        self.load_measurements = measurement
+        if sensor_set is None:
+            self.sensor_positions = []
+        else:
+            self.set_sensor_positions()
         self.ref_sensor_num = 0
-
-    def add_load(self, theoretical_load, measured_load):
-        """
-        add a load model / measurement pair
-
-        theoretical load is a PortImpedance object
-        measured_load is an Impedance object
-        """
-        self.theoretical_loads.append(theoretical_load)
-        self.load_measurements.append(measured_load)
 
     def add_sensor(self, sensor):
         """
@@ -216,3 +215,12 @@ class Calibration(object):
         self.calibration_systems.append(acous_syst)
 
 
+class CalibrationSet(object):
+    def __init__(self, calibrations=[]):
+        self.calibrations = calibrations
+
+    def add_calibration(self, cal):
+        """
+        add a calibration set
+        """
+        self.calibrations.append(cal)
