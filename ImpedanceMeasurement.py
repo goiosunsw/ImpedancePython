@@ -39,6 +39,46 @@ except ImportError:
     tfe = tfe_sig
 
 
+def calculate_impedance_from_pressure(signals, sr, nwind=1024, ref_sensor_num=0):
+    """
+    calculates the uncorrected impedance
+
+    (this is to be compared to a theoretical or known 
+     impedance in order to calculate calibration factors)
+    """
+    slave_sensor_nums = signals.shape[1]
+    slave_sensor_nums.discard(ref_sensor_num)
+
+    l = self.duct.get_total_length()
+    sensor_gains = []
+    sensor_coh = []
+
+    duct = self.load_model
+
+    for sno in slave_sensor_nums:
+        # calculate measured transfer functions
+        tz, ff = tfe(x=signals[:,self.ref_sensor_num],
+                     y=signals[:,sno], Fs=sr, NFFT=nwind)
+        cz, ff = cohere(x=signals[:,self.ref_sensor_num],
+                        y=signals[:,sno], Fs=sr, NFFT=nwind)
+        
+        # calculate theoretical transfer functions
+        calmx_inv = []
+        z0th = []
+
+        for f in ff:
+            cmx1 = duct.transfer_mx_at_freq(f,
+                    from_pos=l-self.sensor_positions[self.ref_sensor_num],
+                    to_pos=l)
+            cmx2 = duct.transfer_mx_at_freq(f,
+                    from_pos=l-self.sensor_positions[sno],
+                    to_pos=l)
+            calmx_inv.append(np.array([cmx1[0,:], cmx2[0,:]]))
+            z0th.append(duct.get_input_impedance_at_freq(f, from_pos=l))
+
+        calmx_inv = np.array(calmx_inv)
+        
+
 class Sensor(object):
     """
     Defines a sensor, characterising its parameters
@@ -56,7 +96,7 @@ class Sensor(object):
         flow_sensitivity: v/(m^3/s)
         sensor_type: Microphone/ Pressure/ Hot Wire
         """
-        self.position=position
+        self.position = position
         self.pressure_sens = pressure_sensitivity
         self.flow_sens = flow_senstitvity
         self.set_description()
@@ -153,10 +193,15 @@ class Calibration(object):
         """
         self.sensor_positions = sorted(positions)
 
+    def update_sensor_positions_from_sensor_list(self):
+        self.sensor_positions = []
+        for sens in self.sensors:
+            self.sensor_positions.append(sens.position)
+
     def get_number_of_sensors(self):
         return len(self.sensor_positions)
 
-    def add_calibration_signals(self, sensors, load, excitation=[]):
+    def add_calibration_signals(self, signals, sr=1.0):
         """
         add a calibration set, including (maybe) the input signal 
         and the measurements by each sensor.
@@ -167,11 +212,17 @@ class Calibration(object):
             Measurement.get_number_of_sensors()
         """
 
-        self.calibration_signals = sensors
+        self.load_measurements.append(signals)
+    
+    def calculate_impedance(self, signals, sr=1.0):
+        """
+        calculates the uncorrected impedance
 
-        acous_syst = deepcopy(self.duct)
-        acous_syst.set_termination(load)
+        (this is to be compared to a theoretical or known 
+         impedance in order to calculate calibration factors)
+        """
         
+        # define signals used to calculate tf from
         slave_sensor_nums = set(np.arange(self.get_number_of_sensors()))
         slave_sensor_nums.discard(self.ref_sensor_num)
 
@@ -179,12 +230,14 @@ class Calibration(object):
         sensor_gains = []
         sensor_coh = []
 
+        duct = self.load_model
+
         for sno in slave_sensor_nums:
             # calculate measured transfer functions
             tz, ff = tfe(x=signals[:,self.ref_sensor_num],
-                               y=signals[:,sno], Fs=sr, NFFT=nwind)
+                         y=signals[:,sno], Fs=sr, NFFT=nwind)
             cz, ff = cohere(x=signals[:,self.ref_sensor_num],
-                                  y=signals[:,sno], Fs=sr, NFFT=nwind)
+                            y=signals[:,sno], Fs=sr, NFFT=nwind)
             
             # calculate theoretical transfer functions
             calmx_inv = []
@@ -205,14 +258,12 @@ class Calibration(object):
             tzth = (calmx_inv[:,1,0]*z0th+calmx_inv[:,1,1]) \
                    (calmx_inv[:,0,0]*z0th+calmx_inv[:,0,1])
 
-            gains = tzth/tz
+            gains = tzth / tz
             sensor_gains.append(gains)
             sensor_coh.append(cz)
 
         self.sensor_gains.append(sensor_gains)
         self.sensor_coherences.append(sensor_coh)
-
-        self.calibration_systems.append(acous_syst)
 
 
 class CalibrationSet(object):
