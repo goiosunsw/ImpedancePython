@@ -214,20 +214,26 @@ class DuctSection(object):
 
         # p_st = tmx[0, 0]*z_end + tmx[0, 1]*1
         # u_st = tmx[1, 0]*z_end + tmx[1, 1]*1
-        p_st = tmx[0, 0]*z_end + tmx[0, 1]*1
-        u_st = tmx[1, 0]*z_end + tmx[1, 1]*1
 
-        if np.isinf(p_st):
-            if np.isinf(u_st):
-                return tmx[0, 0] / tmx[1, 0]
-            else:
-                return np.inf
-
-        if u_st != 0.0:
-            return p_st/u_st
+        if np.isfinite(z_end):
+            p_st = tmx[0, 0]*z_end + tmx[0, 1]*1
+            u_st = tmx[1, 0]*z_end + tmx[1, 1]*1
         else:
-            return np.inf
+            p_st = tmx[0, 0]
+            u_st = tmx[1, 0]
+        return p_st/u_st
 
+#        if np.isinf(p_st):
+#            if np.isinf(u_st):
+#                return tmx[0, 0] / tmx[1, 0]
+#            else:
+#                return np.inf
+#
+#        if u_st != 0.0:
+#            return p_st/u_st
+#        else:
+#            return np.inf
+#
     def get_characteristic_impedance(self):
         """
         returns the characteristic impedance of this duct section
