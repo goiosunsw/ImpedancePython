@@ -917,8 +917,8 @@ class Duct(PortImpedance):
         """
         get the ratios of pressures at two positions in the duct
         """
+        total_length = self.get_total_length()
         if to_pos is None:
-            total_length = self.get_total_length()
             # sys.stderr.write('\nsetting position to {}\n'.format(total_length))
             end_pos = total_length
         else:
@@ -928,10 +928,13 @@ class Duct(PortImpedance):
         cmx2 = self.transfer_mx_at_freq(freq, from_pos=end_pos,
                                         to_pos=total_length)
         calmx_inv = np.array([cmx1[0,:], cmx2[0,:]])
-        z0 = (self.get_input_impedance_at_freq(f, from_pos=l))
-
-        tfp = (calmx_inv[1,0]*z0th+calmx_inv[1,1]) \
-              (calmx_inv[0,0]*z0th+calmx_inv[0,1])
+        z0 = (self.get_input_impedance_at_freq(freq, 
+                                               from_pos=total_length))
+        
+        one = np.isfinite(z0)
+        z0[np.logical_not(one)]=1.
+        tfp = (calmx_inv[1,0]*z0+calmx_inv[1,1]*one) / \
+              (calmx_inv[0,0]*z0+calmx_inv[0,1]*one)
         return tfp
 
     def plot_geometry(self, ax=None):
