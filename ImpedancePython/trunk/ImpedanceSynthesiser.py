@@ -931,7 +931,6 @@ class Duct(PortImpedance):
                                         to_pos=from_pos)
         cmx2 = self.transfer_mx_at_freq(freq, from_pos=ref_pos,
                                         to_pos=to_pos)
-        # calmx_inv = np.array([cmx1[0,:], cmx2[0,:]])
         z0 = (self.get_input_impedance_at_freq(freq,
                                                from_pos=ref_pos))
 
