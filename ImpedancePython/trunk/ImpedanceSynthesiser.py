@@ -913,7 +913,7 @@ class Duct(PortImpedance):
         return mx
 
     def pressure_transfer_func(self, freq=1.0, from_pos=0.0,
-                               to_pos=None):
+                               to_pos=None, ref_pos=None):
         """
         get the ratios of pressures at two positions in the duct
         """
@@ -923,18 +923,24 @@ class Duct(PortImpedance):
             end_pos = total_length
         else:
             end_pos = to_pos
-        cmx1 = self.transfer_mx_at_freq(freq, from_pos=from_pos,
-                                        to_pos=total_length)
-        cmx2 = self.transfer_mx_at_freq(freq, from_pos=end_pos,
-                                        to_pos=total_length)
-        calmx_inv = np.array([cmx1[0,:], cmx2[0,:]])
-        z0 = (self.get_input_impedance_at_freq(freq, 
-                                               from_pos=total_length))
-        
+
+        if ref_pos is None:
+            ref_pos = total_length
+
+        cmx1 = self.transfer_mx_at_freq(freq, from_pos=ref_pos,
+                                        to_pos=from_pos)
+        cmx2 = self.transfer_mx_at_freq(freq, from_pos=ref_pos,
+                                        to_pos=to_pos)
+        # calmx_inv = np.array([cmx1[0,:], cmx2[0,:]])
+        z0 = (self.get_input_impedance_at_freq(freq,
+                                               from_pos=ref_pos))
+
+        # set dummy variable to zero if z0 is infinite
+        # (this will prevent nan for infinite impedances)
         one = np.isfinite(z0)
-        z0[np.logical_not(one)]=1.
-        tfp = (calmx_inv[1,0]*z0+calmx_inv[1,1]*one) / \
-              (calmx_inv[0,0]*z0+calmx_inv[0,1]*one)
+        z0[np.logical_not(one)] = 1.
+        tfp = (cmx2[0,0]*z0 + cmx2[0,1]*one) / \
+              (cmx1[0,0]*z0 + cmx1[0,1]*one)
         return tfp
 
     def plot_geometry(self, ax=None):
@@ -957,7 +963,7 @@ class Duct(PortImpedance):
             ax.set_ylabel('radial distance (m)')
         return ax
 
-    def plot_report(self, ax=None, fmin=50.0, 
+    def plot_report(self, ax=None, fmin=50.0,
                     fmax=2000, npoints=200, scale_type='log'):
         """
         plot a figure with geometry and impedance
