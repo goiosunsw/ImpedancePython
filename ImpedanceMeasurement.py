@@ -133,20 +133,29 @@ class Calibration(object):
     corresponding measurements
     """
 
-    def __init__(self, load_model, measurement=None, sensor_set=None):
+    def __init__(self, load_model, measurement=None,
+                 sensor_set=None, nwind=1024, sr=48000):
         """
         define a new calibration, based on:
         * a sensor set (or None, use Calibration.set_sensor_positions)
         * a load_model (DuctImpedance object)
-        * a set of measurements (set of arrays size (n_samples*n_sensors)
+        * a set of measurements 
+          (set of arrays size (n_samples*n_sensors)
+        * analysis window (2*number of freq bins)
+        * Sampling rate
         """
         self.load_model = load_model
         self.load_measurements = measurement
         if sensor_set is None:
             self.sensor_positions = []
         else:
-            self.set_sensor_positions()
+            self.set_sensor_list(sensor_set)
+            self.update_sensor_positions_from_sensor_list()
         self.ref_sensor_num = 0
+        
+        # set default signal parameters
+        self.sr = sr
+        self.nwind = nwind
 
     def add_sensor(self, sensor):
         """
@@ -191,7 +200,7 @@ class Calibration(object):
         (sensor positions specified in meters from the measurement
         plane)
         """
-        self.sensor_positions = sorted(positions)
+        self.sensor_positions = (positions)
 
     def update_sensor_positions_from_sensor_list(self):
         self.sensor_positions = []
@@ -214,56 +223,51 @@ class Calibration(object):
 
         self.load_measurements.append(signals)
     
-    def calculate_impedance(self, signals, sr=1.0):
+    def calculate_impedance(self, signals):
         """
         calculates the uncorrected impedance
 
         (this is to be compared to a theoretical or known 
          impedance in order to calculate calibration factors)
         """
-        
+
+        sr = self.sr
+        nwind = self.nwind
+
         # define signals used to calculate tf from
+        ref_sensor_pos = self.sensor_positions[self.ref_sensor_num]
         slave_sensor_nums = set(np.arange(self.get_number_of_sensors()))
         slave_sensor_nums.discard(self.ref_sensor_num)
 
-        l = self.duct.get_total_length()
-        sensor_gains = []
-        sensor_coh = []
-
         duct = self.load_model
 
+        sensor_coh = []
+        sensor_gains = []
+        thtf= []
+        mtf = []
+
         for sno in slave_sensor_nums:
+            sensor_pos = self.sensor_positions[sno]
+            
             # calculate measured transfer functions
             tz, ff = tfe(x=signals[:,self.ref_sensor_num],
                          y=signals[:,sno], Fs=sr, NFFT=nwind)
             cz, ff = cohere(x=signals[:,self.ref_sensor_num],
                             y=signals[:,sno], Fs=sr, NFFT=nwind)
+            # get theoretical transfer functions
+            tzth = duct.pressure_transfer_func(freq = ff,
+                             from_pos=ref_sensor_pos,
+                             to_pos=sensor_pos)
             
-            # calculate theoretical transfer functions
-            calmx_inv = []
-            z0th = []
-
-            for f in ff:
-                cmx1 = duct.transfer_mx_at_freq(f,
-                        from_pos=l-self.sensor_positions[self.ref_sensor_num],
-                        to_pos=l)
-                cmx2 = duct.transfer_mx_at_freq(f,
-                        from_pos=l-self.sensor_positions[sno],
-                        to_pos=l)
-                calmx_inv.append(np.array([cmx1[0,:], cmx2[0,:]]))
-                z0th.append(duct.get_input_impedance_at_freq(f, from_pos=l))
-
-            calmx_inv = np.array(calmx_inv)
-            
-            tzth = (calmx_inv[:,1,0]*z0th+calmx_inv[:,1,1]) \
-                   (calmx_inv[:,0,0]*z0th+calmx_inv[:,0,1])
-
+            # FIXME: phase is inverted: why?
+            tzth = np.conj(tzth)
             gains = tzth / tz
             sensor_gains.append(gains)
             sensor_coh.append(cz)
+            thtf.append(tzth)
+            mtf.append(tz)
 
-        self.sensor_gains.append(sensor_gains)
-        self.sensor_coherences.append(sensor_coh)
+        return ff, sensor_gains, sensor_coh, mtf, thtf
 
 
 class CalibrationSet(object):
