@@ -87,7 +87,7 @@ class Sensor(object):
     def __init__(self, position=0.0,
                  pressure_sensitivity = 1.0,
                  flow_sensitivity = 0.0,
-                 sensor_type = 'Microphone'):
+                 sensor_type = 'Microphone', id=''):
         """
         initialise the sensor parameters:
 
@@ -98,21 +98,25 @@ class Sensor(object):
         """
         self.position = position
         self.pressure_sens = pressure_sensitivity
-        self.flow_sens = flow_senstitvity
-        self.set_description()
+        self.flow_sens = flow_sensitivity
+        self.set_description(id=id)
 
-    def set_description(self, description='', type='Microphone',
-                         brand='Unknown', model='', serial_number=''):
+    def set_description(self, id='', 
+                        description='', 
+                        sensor_type='Microphone',
+                        brand='Unknown', model='', serial_number=''):
         """
         Set string descriptors of the mcrophone
 
         (purely for information purposes)
         """
+
         self.description = ''
         self.type = sensor_type
         self.brand = 'Unknown'
         self.model = ''
         self.serial_number = ''
+        self.id = id
 
     def set_position(self, position):
         """
@@ -125,6 +129,134 @@ class Sensor(object):
         get the microphone position (m)
         """
         return self.position
+
+
+class SensorList(object):
+    def __init__(self, sensor_list=[]):
+        self.sensors = []
+        self.set_list(sensor_list)
+        self.sensor_dict = dict()
+        self.ref_sensor_num = 0
+
+    def __getitem__(self, idx):
+        """
+        get a sensor from the list
+        idx can be an order number or id (string)
+        """
+        try:
+            return self.sensors[idx]
+        except TypeError:
+            return self.sensors[self.sensor_dict[idx]]
+        
+        raise KeyError
+
+    def append(self, sensor):
+        """
+        add a sensor
+        """
+        id = sensor.id
+        self.sensors.append(sensor)
+        try:
+            sensor.id = 'mic%d' % int(id)
+        except ValueError:
+            pass
+        self.sensor_dict[id]=sensor.id
+
+    def sort_sensors(self, key='position'):
+        """
+        sort the sensors based on one of its attributes
+        (default: position)
+        """
+        positions = [getattr(xx, key) for xx in self.sensors]
+        sensor_list = []
+        self.sensor_positions = []
+        for ii, pos in sorted(positions):
+            sensor_list.append(self.sensors[ii])
+            self.sensor_positions.append(pos)
+        self.sensors = sensor_list
+
+    def set_list(self, sensor_list):
+        """
+        set the list of sensors used in measurement / calibration
+
+        (unit is meters)
+
+        the list of sensor posisitons is set from the sensor list
+        but is kept in an independent list. It can be set independently.
+        The sensor list is only used for reference
+
+        sensors will be re-sorted based on their positions
+        """
+        self.sensors = sensor_list
+        #self.sort_sensors()
+
+    def set_reference_number(self, num=0):
+        """
+        set the sensor used as a reference, i.e.
+        aginst which others will be compared
+        """
+        self.ref_sensor_num = num
+
+    def get_reference_num(self):
+        """
+        get the index of sensor used as reference (master)
+        i.e., the one against which other transfer functions
+        will be calculated
+        """
+        return self.ref_sensor_num
+
+    def get_slave_list(self):
+        """
+        get list of non-reference sensors 
+        (e.g. to calculate a series of transfer 
+        functions)
+        """
+        sensor_idx = set(np.arange(self.get_number_of_sensors()))
+        sensor_idx.discard(self.ref_sensor_num)
+        return list(sensor_idx)
+
+    def get_number_of_sensors(self):
+        """
+        returns the number of sensors in list
+        """
+
+        return len(self.sensors)
+
+    def get_posisitons(self, indexes=None):
+        """
+        get a list with the positions of the sensors in m
+        """
+        pos = []
+        if indexes is None:
+            indexes = np.arange(self.get_number_of_sensors())
+        for idx in indexes:
+            sens = self.sensors[idx]
+            pos.append(sens.get_position())
+        return pos
+
+    def set_positions(self, position_list=[]):
+        """
+        set the positions of the sensors
+
+        argument is a list of sensor positions in meters
+        they will be attributed in sequence to the sensors
+        registered in the list.
+        Extra positions will create a new sensor with default 
+        properties
+        """
+        
+        # nsens = self.get_number_of_sensors()
+        try:
+            indexes = position_list.keys()
+        except AttributeError:
+            indexes = range(len(position_list))
+        for ii in indexes:
+            pos = position_list[ii]
+            try:
+                self.sensors[ii].position = pos
+            except IndexError, KeyError:
+                sens = Sensor(id=ii, position=pos)
+                self.append(sens)
 
 
 class Calibration(object):
@@ -145,53 +277,13 @@ class Calibration(object):
         * Sampling rate
         """
         self.load_model = load_model
-        self.load_measurements = measurement
         if sensor_set is None:
-            self.sensor_positions = []
+            self.sensor_list = SensorList()
         else:
-            self.set_sensor_list(sensor_set)
-            self.update_sensor_positions_from_sensor_list()
-        self.ref_sensor_num = 0
-        
+            self.sensor_list = sensor_set
         # set default signal parameters
         self.sr = sr
         self.nwind = nwind
-
-    def add_sensor(self, sensor):
-        """
-        add a sensor
-        """
-
-        self.sensors.append(sensor)
-        self.sort_sensors(key='position')
-
-    def sort_sensors(self, key='position'):
-        """
-        sort the sensors based on one of its attributes
-        (default: position)
-        """
-        positions = [getattr(xx, key) for xx in self.sensors]
-        sensor_list = []
-        self.sensor_positions = []
-        for ii, pos in sorted(positions):
-            sensor_list.append(self.sensors[ii])
-            self.sensor_positions.append(pos)
-        self.sensors = sensor_list
-
-    def set_sensor_list(self, sensor_list):
-        """
-        set the list of sensors used in measurement / calibration
-
-        (unit is meters)
-
-        the list of sensor posisitons is set from the sensor list
-        but is kept in an independent list. It can be set independently.
-        The sensor list is only used for reference
-
-        sensors will be re-sorted based on their positions
-        """
-        self.sensors = sensor_list
-        self.sort_sensors()
 
     def set_sensor_positions(self, positions):
         """
@@ -200,7 +292,7 @@ class Calibration(object):
         (sensor positions specified in meters from the measurement
         plane)
         """
-        self.sensor_positions = (positions)
+        self.sensor_list.set_positions(positions)
 
     def update_sensor_positions_from_sensor_list(self):
         self.sensor_positions = []
@@ -209,6 +301,13 @@ class Calibration(object):
 
     def get_number_of_sensors(self):
         return len(self.sensor_positions)
+
+    def get_reference_id(self):
+        ref = self.sensor_list.get_reference_num()
+        return ref
+
+    def get_slave_sensors(self):
+        return self.sensor_list.get_slave_list()
 
     def add_calibration_signals(self, signals, sr=1.0):
         """
@@ -235,9 +334,9 @@ class Calibration(object):
         nwind = self.nwind
 
         # define signals used to calculate tf from
-        ref_sensor_pos = self.sensor_positions[self.ref_sensor_num]
-        slave_sensor_nums = set(np.arange(self.get_number_of_sensors()))
-        slave_sensor_nums.discard(self.ref_sensor_num)
+        ref_num = self.get_reference_id()
+        ref_sensor_pos = self.sensor_list[ref_num].get_position()
+        slave_sensor_nums = self.get_slave_sensors()
 
         duct = self.load_model
 
@@ -247,15 +346,15 @@ class Calibration(object):
         mtf = []
 
         for sno in slave_sensor_nums:
-            sensor_pos = self.sensor_positions[sno]
+            sensor_pos = self.sensor_list[sno].get_position()
             
             # calculate measured transfer functions
-            tz, ff = tfe(x=signals[:,self.ref_sensor_num],
+            tz, ff = tfe(x=signals[:,ref_num],
                          y=signals[:,sno], Fs=sr, NFFT=nwind)
-            cz, ff = cohere(x=signals[:,self.ref_sensor_num],
+            cz, ff = cohere(x=signals[:,ref_num],
                             y=signals[:,sno], Fs=sr, NFFT=nwind)
             # get theoretical transfer functions
-            tzth = duct.pressure_transfer_func(freq = ff,
+            tzth = duct.pressure_transfer_func(freq=ff,
                              from_pos=ref_sensor_pos,
                              to_pos=sensor_pos)
             
@@ -273,9 +372,14 @@ class Calibration(object):
 class CalibrationSet(object):
     def __init__(self, calibrations=[]):
         self.calibrations = calibrations
+        self.sensor_list = [] 
+        self.sensor_positions = []
+        self.sensor_gains = []
+        self.ref_sensor_num = 0
 
     def add_calibration(self, cal):
         """
-        add a calibration set
+        add a calibration set, setting the sensor configuration
         """
+        cal.set_sensor_list(self.sensor_list)
         self.calibrations.append(cal)
