@@ -368,6 +368,7 @@ class Calibration(object):
 
         return ff, sensor_gains, sensor_coh, mtf, thtf
 
+
 class ImpedanceHead(object):
     """
     defines an impedance head with basic acoustic system
@@ -376,14 +377,22 @@ class ImpedanceHead(object):
     def __init__(self, duct, sensor_set=[]):
         self.duct = duct
         self.sensor_set = sensor_set
+        self.base_geometry = imps.StraightDuct()
+        self.calibration_set = []
+
+    def set_geometry(self, duct):
+        self.base_geometry = duct
+
 
 class CalibrationSet(object):
-    def __init__(self, calibrations=[]):
+    def __init__(self, calibrations=[], 
+                 impedance_head=None):
         self.calibrations = calibrations
         self.sensor_list = [] 
         self.sensor_positions = []
         self.sensor_gains = []
         self.ref_sensor_num = 0
+        self.impedance_head = impedance_head
 
     def add_calibration(self, cal):
         """
@@ -391,3 +400,17 @@ class CalibrationSet(object):
         """
         cal.set_sensor_list(self.sensor_list)
         self.calibrations.append(cal)
+
+    def add_load(self, load):
+        """
+        add a calibration load, attaching it to the default 
+        impedance head
+        """
+        if impedance_head is None:
+            raise AttributeError("""Base Impedance head not defined
+            Define with CalibrationSet.set_head()""")
+        else:
+            cal = self.impedance_head.generate_calibration(load)
+            self.add_calibration(cal)
+
+
