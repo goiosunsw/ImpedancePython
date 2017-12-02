@@ -135,7 +135,7 @@ class SensorList(object):
     def __init__(self, sensor_list=[]):
         self.sensors = []
         self.set_list(sensor_list)
-        self.sensor_dict = dict()
+        self.sensor_dict = {ii:ss for ii,ss in enumerate(self.sensors)}
         self.ref_sensor_num = 0
 
     def __getitem__(self, idx):
@@ -160,7 +160,7 @@ class SensorList(object):
             sensor.id = 'mic%d' % int(id)
         except ValueError:
             pass
-        self.sensor_dict[id]=sensor.id
+        self.sensor_dict[id] = self.sensors.index(sensor)
 
     def sort_sensors(self, key='position'):
         """
@@ -368,6 +368,14 @@ class Calibration(object):
 
         return ff, sensor_gains, sensor_coh, mtf, thtf
 
+class ImpedanceHead(object):
+    """
+    defines an impedance head with basic acoustic system
+    and sensor configuration
+    """
+    def __init__(self, duct, sensor_set=[]):
+        self.duct = duct
+        self.sensor_set = sensor_set
 
 class CalibrationSet(object):
     def __init__(self, calibrations=[]):
