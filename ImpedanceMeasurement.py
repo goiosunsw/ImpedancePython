@@ -254,7 +254,7 @@ class SensorList(object):
             pos = position_list[ii]
             try:
                 self.sensors[ii].position = pos
-            except IndexError, KeyError:
+            except (IndexError, KeyError):
                 sens = Sensor(id=ii, position=pos)
                 self.append(sens)
 
@@ -270,7 +270,7 @@ class Calibration(object):
         """
         define a new calibration, based on:
         * a sensor set (or None, use Calibration.set_sensor_positions)
-        * a load_model (DuctImpedance object)
+        * a load_model (Duct object)
         * a set of measurements 
           (set of arrays size (n_samples*n_sensors)
         * analysis window (2*number of freq bins)
@@ -374,14 +374,57 @@ class ImpedanceHead(object):
     defines an impedance head with basic acoustic system
     and sensor configuration
     """
-    def __init__(self, duct, sensor_set=[]):
-        self.duct = duct
-        self.sensor_set = sensor_set
-        self.base_geometry = imps.StraightDuct()
+    def __init__(self, duct=None, sensor_set=None):
+        #self.duct = duct
+        if sensor_set is None:
+            self.sensor_set = SensorList()
+        else:
+            self.sensor_set = sensor_set
+
+        if duct is None:
+            l = .1
+            r = .05
+            duct = imps.Duct()
+            duct.append_element(imps.StraightDuct(length=l,radius=r))
+            self.base_geometry = duct
+        else:
+            self.base_geometry = duct
         self.calibration_set = []
 
     def set_geometry(self, duct):
+        """
+        set the base geometry of the impedance head
+        (usually a straight duct)
+        """
         self.base_geometry = duct
+
+    def check_sensor_consistency(self):
+        """
+        checks that sensor positions fit in the impedance head
+        """
+
+        consistent = True
+        head_length = self.base_geometry.get_total_length()
+        for sensor in self.sensor_set:
+            if sensor.get_position() > head_length:
+                consistent = False
+        return consistent
+
+    def generate_calibration(self, load):
+        """
+        generates a calibration object by attaching the
+        load to the calibration head
+        """
+        new_load = self.base_geometry.attach_load(load)
+        return new_load
+
+    def set_sensor_positions(self, pos):
+        """
+        set or change sensor positions
+        (see SensorList.set_positions)
+        """
+
+        self.sensor.set.set_positions(pos)
 
 
 class CalibrationSet(object):
@@ -405,6 +448,9 @@ class CalibrationSet(object):
         """
         add a calibration load, attaching it to the default 
         impedance head
+
+        returns the matching calibration object
+        (without any calibration data)
         """
         if impedance_head is None:
             raise AttributeError("""Base Impedance head not defined
@@ -413,4 +459,11 @@ class CalibrationSet(object):
             cal = self.impedance_head.generate_calibration(load)
             self.add_calibration(cal)
 
+        return cal
 
+    def add_load_with_measurements(self, load, signals):
+        """
+        adds a calibration load with the matching measurements
+        """
+        cal = self.add_load(load)
+        cal.add_calibration_signals(signals)
