@@ -3,14 +3,13 @@ Functions to compute 1D input impedances of instruments
 from geometrical data of a linear resontor.
 
 Uses global parameters contained in phys_params
-
-
 """
 
 import numpy as np
 import sys
 import matplotlib.pyplot as pl
 import Impedance as imp
+from copy import copy
 
 phys_params = {'speed_of_sound': 343.2,
                'medium_density': 1.2}
@@ -698,6 +697,28 @@ class Duct(PortImpedance):
         element.set_parent(self)
         self.elements.append(element)
         self.update_element_pos()
+    
+    def copy(self):
+        new_duct = copy(self)
+        new_duct.elements = copy(new_duct.elements)
+        new_duct.element_positions = copy(new_duct.element_positions)
+        return new_duct
+
+    def new_with_attached_load(self, load):
+        """
+        returns a new duct object with the load attached
+        to the end of the current duct
+        """
+        new_duct = self.copy()
+
+        if isinstance(load, Duct):
+            for el in load.elements:
+                new_duct.append_element(el)
+            new_duct.set_termination(load.termination)
+        else:
+            new_duct.set_termination(load)
+
+        return(new_duct)
 
     def insert_element(self, element, pos):
         assert isinstance(element, DuctSection)
