@@ -420,7 +420,6 @@ class DuctTests(unittest.TestCase):
             self.assertEqual(pos1, pos2)
 
 
-
     def test_duct_attach(self):
         duct = random_duct()
         duct2 = random_duct()
@@ -431,7 +430,21 @@ class DuctTests(unittest.TestCase):
         self.assertEqual(n_el_new, n_el_1+n_el_2)
         self.assertEqual(longer_duct.termination, duct2.termination)
 
-        
+
+class VectorTests(unittest.TestCase):
+    def test_open_end_freq_vector(self):
+        f = np.array([10,100,1000])
+        for term in [PerfectOpenEnd,
+                     PerfectClosedEnd,
+                     PerfectAnechoicEnd]:
+            #print('vector test')
+            print(term)
+            tt = term()
+            z = tt._get_impedance_at_freq(f)
+            self.assertEqual(len(z),len(f))
+            for (ff,zz) in zip(f,z):
+                self.assertEqual(zz,tt._get_impedance_at_freq(ff))
+
 
 def main():
     unittest.main()
