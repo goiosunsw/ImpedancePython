@@ -540,7 +540,12 @@ class TerminationImpedance(DuctSection):
         returns the value of the reflection coefficient (complex)
         at a given frequency
         """
-        return -1.
+        return -np.ones_like(freq)
+        # return r
+        # if r.shape == 0:
+        #     return r[()]
+        # else:
+        #     return r
 
     def _get_impedance_at_freq(self, freq):
         """
@@ -548,10 +553,7 @@ class TerminationImpedance(DuctSection):
         at given frequency
         """
         r = self._get_reflection_coeff_at_freq(freq)
-        if r != 1.0:
-            return (1.+r)/(1.-r)
-        else:
-            return np.inf
+        return (1.+r)/(1.-r)
 
     def plot_impedance(self, fig=None, fmin=0.0, fmax=4000.0, npoints=200):
         """
@@ -589,7 +591,7 @@ class PerfectClosedEnd(TerminationImpedance):
     at any given frequency
     """
     def _get_reflection_coeff_at_freq(self, freq):
-        return 1.
+        return np.ones_like(freq)
 
 class PerfectAnechoicEnd(TerminationImpedance):
     """
@@ -598,7 +600,7 @@ class PerfectAnechoicEnd(TerminationImpedance):
     Reflection function R(f) = 1
     """
     def _get_reflection_coeff_at_freq(self, freq):
-        return 0.
+        return np.zeros_like(freq)
 
 
 class PortImpedance(object):
