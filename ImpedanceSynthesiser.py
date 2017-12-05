@@ -99,7 +99,7 @@ def transfer_to_travelling_mx(transfer, char_impedance=1.0):
     ttm = transfer_to_travelling_conversion_mx()
     ttmi = np.linalg.inv(ttm)
     trav = np.dot(transfer, ttmi)
-    trav = np.dot(ttm, transfer)
+    trav = np.dot(ttm, trav)
     return trav
 
 

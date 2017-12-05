@@ -145,7 +145,7 @@ class ChainingTests(unittest.TestCase):
         for f in fvec:
             r = term._get_reflection_coeff_at_freq(f)
             r = mid1._chain_reflection_coeff_at_freq(r, f)
-            self.assertAlmostEqual(np.abs(r),1.)
+            self.assertAlmostEqual(np.abs(r),1.,places=1)
 
 class DuctTests(unittest.TestCase):
 
@@ -303,7 +303,9 @@ class DuctTests(unittest.TestCase):
         err_msg = 'Failed at freq {}:\n * tm_s[{},{}] = {},\n   expected {}'
 
         for f in fvec:
-            tm_d = duct.travelling_mx_at_freq(freq=f, from_pos=pos, to_pos=pos)
+            tm_d = duct.travelling_mx_at_freq(freq=f, 
+                                              from_pos=pos, 
+                                              to_pos=pos)
             for row in range(tm_d.shape[0]):
                 for col in range(tm_d.shape[1]):
                     self.assertAlmostEqual(tm_d[row, col], solution[row, col],
