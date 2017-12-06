@@ -443,7 +443,19 @@ class ImpedanceHead(object):
 
 class CalibrationSet(object):
     def __init__(self, calibrations=None,
-                 impedance_head=None):
+                 impedance_head=None,
+                 nwind=None, sr=None):
+        """
+        initialises the container for a set of calibrations
+
+        There are two ways of populating the calibration:
+        1. provide a set of calibration objects. These do not
+           distinguish between impedance head and load. Sensor
+           positions and gemoetry before last sensor
+           should match (not checked for now)
+        2. provide an impedance head and add loads (maybe with
+           measurements). These are appended to the impedance head)
+        """
         if calibrations is None:
             self.calibrations = []
         else:
@@ -453,6 +465,8 @@ class CalibrationSet(object):
         #self.sensor_gains = []
         self.ref_sensor_num = 0
         self.impedance_head = impedance_head
+        self.nwind = nwind
+        self.sr = sr
 
     def add_calibration(self, cal):
         """
