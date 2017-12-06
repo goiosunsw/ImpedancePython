@@ -132,9 +132,12 @@ class Sensor(object):
 
 
 class SensorList(object):
-    def __init__(self, sensor_list=[]):
+    def __init__(self, sensor_list=None):
         self.sensors = []
-        self.set_list(sensor_list)
+        if sensor_list is None:
+            self.sensor_list = []
+        else:
+            self.set_list(sensor_list)
         self.sensor_dict = {ii:ss for ii,ss in enumerate(self.sensors)}
         self.ref_sensor_num = 0
 
@@ -271,7 +274,7 @@ class Calibration(object):
         define a new calibration, based on:
         * a sensor set (or None, use Calibration.set_sensor_positions)
         * a load_model (Duct object)
-        * a set of measurements 
+        * a set of measurements
           (set of arrays size (n_samples*n_sensors)
         * analysis window (2*number of freq bins)
         * Sampling rate
@@ -293,6 +296,17 @@ class Calibration(object):
         plane)
         """
         self.sensor_list.set_positions(positions)
+
+    def set_sensor_list(self, sensor_list):
+        """
+        Sets the sensor list.
+        """
+        if isinstance(sensor_list, SensorList):
+            self.sensor_list = sensor_list
+        else:
+            self.sensor_list = SensorList(sensor_list)
+
+
 
     def update_sensor_positions_from_sensor_list(self):
         self.sensor_positions = []
@@ -389,7 +403,7 @@ class ImpedanceHead(object):
             self.base_geometry = duct
         else:
             self.base_geometry = duct
-        self.calibration_set = []
+        self.sensor_gains = []
 
     def set_geometry(self, duct):
         """
@@ -415,7 +429,7 @@ class ImpedanceHead(object):
         generates a calibration object by attaching the
         load to the calibration head
         """
-        new_load = self.base_geometry.attach_load(load)
+        new_load = self.base_geometry.new_with_attached_load(load)
         return new_load
 
     def set_sensor_positions(self, pos):
@@ -428,12 +442,15 @@ class ImpedanceHead(object):
 
 
 class CalibrationSet(object):
-    def __init__(self, calibrations=[], 
+    def __init__(self, calibrations=None,
                  impedance_head=None):
-        self.calibrations = calibrations
-        self.sensor_list = [] 
-        self.sensor_positions = []
-        self.sensor_gains = []
+        if calibrations is None:
+            self.calibrations = []
+        else:
+            self.calibrations = calibrations
+        #self.sensor_list = []
+        #self.sensor_positions = []
+        #self.sensor_gains = []
         self.ref_sensor_num = 0
         self.impedance_head = impedance_head
 
@@ -446,17 +463,20 @@ class CalibrationSet(object):
 
     def add_load(self, load):
         """
-        add a calibration load, attaching it to the default 
+        add a calibration load, attaching it to the default
         impedance head
 
         returns the matching calibration object
         (without any calibration data)
+        also appends the generated calibration object
+        to the calibration load
         """
-        if impedance_head is None:
+        if self.impedance_head is None:
             raise AttributeError("""Base Impedance head not defined
             Define with CalibrationSet.set_head()""")
         else:
-            cal = self.impedance_head.generate_calibration(load)
+            cal_duct = self.impedance_head.generate_calibration(load)
+            cal = Calibration(load_model=cal_duct)
             self.add_calibration(cal)
 
         return cal
@@ -467,3 +487,51 @@ class CalibrationSet(object):
         """
         cal = self.add_load(load)
         cal.add_calibration_signals(signals)
+
+    def set_sensors(self, sensor_list):
+        """
+        set the sensor list
+
+        sensor list can be a SensorList object
+        or a list of sensors
+        """
+        if isinstance(sensor_list, SensorList):
+            self.sensor_list = sensor_list
+        else:
+            self.sensor_list = SensorList(sensor_list)
+
+    def set_sensor_positions(self, pos):
+        """
+        set the sensor list with position information only
+        """
+        self.sensor_list.set_positions(pos)
+
+    def combine_calibrations(self):
+        """
+        combines all calibration data to generate
+        sensor parameters and confindence
+
+        returns sensor gains (per frequency)
+           and  confidence (0-1 per frequency)
+        """
+        power=16*1
+
+        g = []
+        weights=[]
+        fvec = self.get_frequency_vector()
+
+        for mic_nbr, mic in enumerate(self.sensors):
+            gg = np.zeros(len(fvec))
+            ww = np.zeros(len(fvec))
+            allw = np.zeros(len(fvec))
+            for cal_nbr, cal in enumerate(self.calibrations):
+                weights.append(cal[mic_nbr].coh**power)
+                allw += weights[cal_nbr]
+            
+            for cal_nbr, cal in enumerate(self.calibrations):
+                weights[cal_nbr] /= allw
+                gg += (20*np.log10(np.abs(cal[mic_nbr].gains)) *
+                       weights[cal_nbr])
+            g.append(gg)
+
+    return g, weights
