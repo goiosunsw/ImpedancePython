@@ -211,15 +211,12 @@ class DuctSection(object):
                                                             to_pos=to_pos, 
                                                             reverse=reverse)
 
-        # p_st = tmx[0, 0]*z_end + tmx[0, 1]*1
-        # u_st = tmx[1, 0]*z_end + tmx[1, 1]*1
-
-        if np.isfinite(z_end):
-            p_st = tmx[0, 0]*z_end + tmx[0, 1]*1
-            u_st = tmx[1, 0]*z_end + tmx[1, 1]*1
-        else:
-            p_st = tmx[0, 0]
-            u_st = tmx[1, 0]
+       # set dummy variable to zero if z0 is infinite
+        # (this will prevent nan for infinite impedances)
+        one = np.isfinite(z_end)
+        z_end[np.logical_not(one)] = 1.
+        p_st = tmx[0, 0]*z_end + tmx[0, 1]*one
+        u_st = tmx[1, 0]*z_end + tmx[1, 1]*one
         return p_st/u_st
 
 #        if np.isinf(p_st):

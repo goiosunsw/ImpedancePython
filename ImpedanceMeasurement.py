@@ -12,7 +12,6 @@ import matplotlib.pyplot as pl
 import ImpedanceSynthesiser as imps
 import scipy.signal as sig
 import warnings
-from copy import deepcopy
 
 
 def tfe_sig(y, x, *args, **kwargs):
@@ -38,7 +37,9 @@ except ImportError:
     tfe = tfe_sig
 
 
-def calculate_impedance_from_pressure(signals, sr, nwind=1024, ref_sensor_num=0):
+def calculate_impedance_from_pressure(signals, sr, 
+                                      nwind=1024, 
+                                      ref_sensor_num=0):
     """
     calculates the uncorrected impedance
 
@@ -268,7 +269,7 @@ class Calibration(object):
     """
 
     def __init__(self, load_model, measurement=None,
-                 sensor_set=None, nwind=1024, sr=48000):
+                 sensor_set=None, nwind=None, sr=None):
         """
         define a new calibration, based on:
         * a sensor set (or None, use Calibration.set_sensor_positions)
@@ -356,7 +357,10 @@ class Calibration(object):
                 raise RuntimeError('Sample rate mismatch')
 
 
-        self.load_measurements.append(signals)
+        # self.load_measurements.append(signals)
+        f, gains, coh, _, _ = self.calculate_impedance(signals)
+        self.gains = gains
+        self.coherence = coh
     
     def calculate_impedance(self, signals):
         """
@@ -364,6 +368,14 @@ class Calibration(object):
 
         (this is to be compared to a theoretical or known 
          impedance in order to calculate calibration factors)
+
+        input: signals (N x Nbr of sensors)
+
+        returns:
+            freq_vector, sensor_gains, gain_coherence, 
+              measured_transfer_funct, theoretical_tf
+
+            * sensor gains, coherence and tf are given at freq_vector
         """
 
         sr = self.sr
@@ -504,9 +516,8 @@ class CalibrationSet(object):
         add a calibration set, setting the sensor configuration
         """
         cal.set_sensor_list(self.impedance_head.sensor_set)
-        nwind = cal.get_nwind()
-        sr = cal.get_sampling_rate()
         nwind = cal.get_window_length()
+        sr = cal.get_sampling_rate()
         if self.nwind is None:
             self.nwind = nwind
         else:
@@ -518,7 +529,8 @@ class CalibrationSet(object):
             if self.sr != sr:
                 raise RuntimeError('Sample rate of calibration signals does not match project rate' )
 
-        cal.set_signal_params(nwind=self.nwind, sr=self.sr)
+        cal.set_window_length(self.nwind)
+        cal.set_sampling_rate(self.sr)
         self.calibrations.append(cal)
 
     def add_load(self, load):
@@ -581,7 +593,7 @@ class CalibrationSet(object):
         gg = np.zeros(len(fvec))
         allw = np.zeros(len(fvec))
         for cal_nbr, cal in enumerate(self.calibrations):
-            weights = (cal[mic_nbr].coh**power)
+            weights = (cal[mic_nbr].coherence**power)
             allw += weights
 
         for cal_nbr, cal in enumerate(self.calibrations):
