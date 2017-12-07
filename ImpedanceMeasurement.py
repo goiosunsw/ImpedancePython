@@ -8,11 +8,10 @@ Uses global parameters contained in phys_params
 """
 
 import numpy as np
-import sys
 import matplotlib.pyplot as pl
-import Impedance as imp
 import ImpedanceSynthesiser as imps
 import scipy.signal as sig
+import warnings
 from copy import deepcopy
 
 
@@ -225,7 +224,7 @@ class SensorList(object):
 
         return len(self.sensors)
 
-    def get_posisitons(self, indexes=None):
+    def get_positions(self, indexes=None):
         """
         get a list with the positions of the sensors in m
         """
@@ -306,7 +305,19 @@ class Calibration(object):
         else:
             self.sensor_list = SensorList(sensor_list)
 
+    def get_sampling_rate(self):
+        return self.sr
 
+    def set_sampling_rate(self, sr):
+        if self.sr is not None:
+            warnings.warn('Signals already present. Resetting the sampling rate will break the calibration.\nPrevious sample rate %f'% self.sr)
+        self.sr = sr
+
+    def set_window_length(self, nwind):
+        self.nwind = nwind
+
+    def get_window_length(self):
+        return self.nwind
 
     def update_sensor_positions_from_sensor_list(self):
         self.sensor_positions = []
@@ -314,6 +325,10 @@ class Calibration(object):
             self.sensor_positions.append(sens.position)
 
     def get_number_of_sensors(self):
+        """
+        return the number of sensors associated with
+        the calibration
+        """
         return len(self.sensor_positions)
 
     def get_reference_id(self):
@@ -333,6 +348,13 @@ class Calibration(object):
 
             Measurement.get_number_of_sensors()
         """
+        cal_sr = self.get_sampling_rate()
+        if cal_sr is None:
+            self.set_sampling_rate(sr)
+        else:
+            if cal_sr != sr:
+                raise RuntimeError('Sample rate mismatch')
+
 
         self.load_measurements.append(signals)
     
@@ -438,7 +460,15 @@ class ImpedanceHead(object):
         (see SensorList.set_positions)
         """
 
-        self.sensor.set.set_positions(pos)
+        self.sensor_set.set_positions(pos)
+
+    def get_sensor_positions(self):
+        """
+        get sensor positions
+        (see SensorList.get_positions)
+        """
+
+        return self.sensor_set.get_positions()
 
 
 class CalibrationSet(object):
@@ -467,12 +497,28 @@ class CalibrationSet(object):
         self.impedance_head = impedance_head
         self.nwind = nwind
         self.sr = sr
+        self.coherence_to_weight_power = 16
 
     def add_calibration(self, cal):
         """
         add a calibration set, setting the sensor configuration
         """
-        cal.set_sensor_list(self.sensor_list)
+        cal.set_sensor_list(self.impedance_head.sensor_set)
+        nwind = cal.get_nwind()
+        sr = cal.get_sampling_rate()
+        nwind = cal.get_window_length()
+        if self.nwind is None:
+            self.nwind = nwind
+        else:
+            cal.set_window_length(nwind)
+
+        if self.sr is None:
+            self.sr = sr
+        else:
+            if self.sr != sr:
+                raise RuntimeError('Sample rate of calibration signals does not match project rate' )
+
+        cal.set_signal_params(nwind=self.nwind, sr=self.sr)
         self.calibrations.append(cal)
 
     def add_load(self, load):
@@ -510,9 +556,9 @@ class CalibrationSet(object):
         or a list of sensors
         """
         if isinstance(sensor_list, SensorList):
-            self.sensor_list = sensor_list
+            self.impedance_head.sensor_set = sensor_list
         else:
-            self.sensor_list = SensorList(sensor_list)
+            self.impedance_head.sensor_set = SensorList(sensor_list)
 
     def set_sensor_positions(self, pos):
         """
@@ -520,32 +566,48 @@ class CalibrationSet(object):
         """
         self.sensor_list.set_positions(pos)
 
-    def combine_calibrations(self):
+    def combine_sensor_calibrations(self, mic_nbr):
         """
-        combines all calibration data to generate
-        sensor parameters and confindence
+        combines all calibration data for a given sensor
+        to generate sensor parameters and confindence
 
         returns sensor gains (per frequency)
            and  confidence (0-1 per frequency)
         """
-        power=16*1
+        power = self.coherence_to_weight_power
 
-        g = []
-        weights=[]
         fvec = self.get_frequency_vector()
 
-        for mic_nbr, mic in enumerate(self.sensors):
-            gg = np.zeros(len(fvec))
-            ww = np.zeros(len(fvec))
-            allw = np.zeros(len(fvec))
-            for cal_nbr, cal in enumerate(self.calibrations):
-                weights.append(cal[mic_nbr].coh**power)
-                allw += weights[cal_nbr]
-            
-            for cal_nbr, cal in enumerate(self.calibrations):
-                weights[cal_nbr] /= allw
-                gg += (20*np.log10(np.abs(cal[mic_nbr].gains)) *
-                       weights[cal_nbr])
-            g.append(gg)
+        gg = np.zeros(len(fvec))
+        allw = np.zeros(len(fvec))
+        for cal_nbr, cal in enumerate(self.calibrations):
+            weights = (cal[mic_nbr].coh**power)
+            allw += weights
 
-    return g, weights
+        for cal_nbr, cal in enumerate(self.calibrations):
+            weights /= allw
+            gg += (20*np.log10(np.abs(cal[mic_nbr].gains)) *
+                   weights)
+
+        return gg, weights
+
+    def calibrate_gains(self):
+        """
+        calibrates gains for all sensors, setting the gains
+        in the sensor list
+        """
+
+        for sens_nbr, sensor in enumerate(self.sensor_list):
+            gains, weights = self.combine_sensor_calibrations(sens_nbr)
+            sensor.set_gains(gains=gains, weights=weights)
+
+    def get_sensor_positions(self):
+        """
+        get sensor positions associated with the 
+        calibration set (stored in ImpedanceHead)
+        """
+
+        return self.impedance_head.get_sensor_positions()
+
+
+
