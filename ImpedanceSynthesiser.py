@@ -211,7 +211,7 @@ class DuctSection(object):
                                                             to_pos=to_pos, 
                                                             reverse=reverse)
 
-       # set dummy variable to zero if z0 is infinite
+        # set dummy variable to zero if z0 is infinite
         # (this will prevent nan for infinite impedances)
         one = np.isfinite(z_end)
         z_end[np.logical_not(one)] = 1.

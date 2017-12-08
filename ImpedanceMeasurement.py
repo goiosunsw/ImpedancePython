@@ -100,6 +100,19 @@ class Sensor(object):
         self.pressure_sens = pressure_sensitivity
         self.flow_sens = flow_sensitivity
         self.set_description(id=id)
+        self.gains = None
+        self.gains_confidence = None
+        self.gains_fvec = None
+
+    def set_gains(self, gains=None, confidence=None, fvec=None):
+        """
+        set the sensor gains and confidences at the frequencies
+        given by fvec
+        """
+        assert len(fvec)==len(gains)
+        self.confidence = confidence
+        self.gains = gains
+        self.fvec = fvec
 
     def set_description(self, id='', 
                         description='', 
@@ -152,6 +165,9 @@ class SensorList(object):
             return self.sensors[self.sensor_dict[idx]]
         
         raise KeyError
+
+    def __len__(self):
+        return len(self.sensors)
 
     def append(self, sensor):
         """
@@ -322,7 +338,7 @@ class Calibration(object):
 
     def update_sensor_positions_from_sensor_list(self):
         self.sensor_positions = []
-        for sens in self.sensors:
+        for sens in self.sensor_list:
             self.sensor_positions.append(sens.position)
 
     def get_number_of_sensors(self):
@@ -330,7 +346,7 @@ class Calibration(object):
         return the number of sensors associated with
         the calibration
         """
-        return len(self.sensor_positions)
+        return len(self.sensor_list)
 
     def get_reference_id(self):
         ref = self.sensor_list.get_reference_num()
@@ -393,7 +409,7 @@ class Calibration(object):
         thtf= []
         mtf = []
 
-        for sno in slave_sensor_nums:
+        for sno in range(self.get_number_of_sensors()):
             sensor_pos = self.sensor_list[sno].get_position()
             
             # calculate measured transfer functions
@@ -515,7 +531,7 @@ class CalibrationSet(object):
         """
         add a calibration set, setting the sensor configuration
         """
-        cal.set_sensor_list(self.impedance_head.sensor_set)
+        cal.set_sensor_list(self.get_sensors())
         nwind = cal.get_window_length()
         sr = cal.get_sampling_rate()
         if self.nwind is None:
@@ -553,12 +569,14 @@ class CalibrationSet(object):
 
         return cal
 
-    def add_load_with_measurements(self, load, signals):
+    def add_load_with_measurements(self, load, signals, sr=None):
         """
         adds a calibration load with the matching measurements
         """
         cal = self.add_load(load)
-        cal.add_calibration_signals(signals)
+        if sr is None:
+            sr = self.get_sampling_rate()
+        cal.add_calibration_signals(signals,sr=sr)
 
     def set_sensors(self, sensor_list):
         """
@@ -576,9 +594,10 @@ class CalibrationSet(object):
         """
         set the sensor list with position information only
         """
-        self.sensor_list.set_positions(pos)
+        sensor_list = self.get_sensors()
+        sensor_list.set_positions(pos)
 
-    def combine_sensor_calibrations(self, mic_nbr):
+    def mix_calibrations(self, mic_nbr):
         """
         combines all calibration data for a given sensor
         to generate sensor parameters and confindence
@@ -590,18 +609,19 @@ class CalibrationSet(object):
 
         fvec = self.get_frequency_vector()
 
-        gg = np.zeros(len(fvec))
+        gg = np.zeros(len(fvec),dtype='complex')
         allw = np.zeros(len(fvec))
+        weight_vec = []
         for cal_nbr, cal in enumerate(self.calibrations):
-            weights = (cal[mic_nbr].coherence**power)
+            weights = (cal.coherence[mic_nbr]**power)
+            weight_vec.append(weights)
             allw += weights
 
         for cal_nbr, cal in enumerate(self.calibrations):
-            weights /= allw
-            gg += (20*np.log10(np.abs(cal[mic_nbr].gains)) *
-                   weights)
+            weights = weight_vec[cal_nbr]/allw
+            gg += (cal.gains[mic_nbr]) * weights
 
-        return gg, weights
+        return gg, allw/(cal_nbr+1)
 
     def calibrate_gains(self):
         """
@@ -609,9 +629,44 @@ class CalibrationSet(object):
         in the sensor list
         """
 
-        for sens_nbr, sensor in enumerate(self.sensor_list):
-            gains, weights = self.combine_sensor_calibrations(sens_nbr)
-            sensor.set_gains(gains=gains, weights=weights)
+        fvec = self.get_frequency_vector()
+
+        for sens_nbr, sensor in enumerate(self.get_sensors()):
+            gains, weights = self.mix_calibrations(sens_nbr)
+            sensor.set_gains(gains=gains, confidence=weights,
+                             fvec=fvec)
+
+    def update_sr_from_calibrations(self):
+        """
+        updates the value of the smapling rate from member
+        calibrations and checks that they are all equal
+        """
+        sr = None
+        for cal in self.calibrations:
+            if sr is None:
+                sr = cal.get_sampling_rate()
+            else:
+                cal_sr = cal.get_sampling_rate()
+                if cal_sr:
+                    assert(cal.get_sampling_rate() == sr)
+        self.sr = sr
+
+    def get_sampling_rate(self):
+        """
+        get the project sampling rate and update it from calibrations
+        if needed
+        """
+        if self.sr is None:
+            self.update_sr_from_calibrations()
+        return self.sr
+
+    def get_frequency_vector(self):
+        """
+        return a vector of frequencies corresponding to calibration
+        vectors
+        """
+        sr = self.get_sampling_rate()
+        return np.linspace(0,sr,int(self.nwind/2)+1)
 
     def get_sensor_positions(self):
         """
@@ -620,6 +675,12 @@ class CalibrationSet(object):
         """
 
         return self.impedance_head.get_sensor_positions()
+
+    def get_sensors(self):
+        """
+        return the sensor list as a SensorList object
+        """
+        return self.impedance_head.sensor_set
 
 
 
