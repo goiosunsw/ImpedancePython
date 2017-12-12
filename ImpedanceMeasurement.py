@@ -110,16 +110,24 @@ class Sensor(object):
         given by fvec
         """
         assert len(fvec)==len(gains)
-        self.confidence = confidence
+        self.gains_confidence = confidence
         self.gains = gains
-        self.fvec = fvec
+        self.gains_fvec = fvec
+
+    def get_gains(self):
+        """
+        returns the freq. vector, gains and confidence 
+        for the sensor
+        """
+
+        return self.gains_fvec, self.gains, self.gains_confidence
 
     def set_description(self, id='', 
                         description='', 
                         sensor_type='Microphone',
                         brand='Unknown', model='', serial_number=''):
         """
-        Set string descriptors of the mcrophone
+        Set string descriptors of the microphone
 
         (purely for information purposes)
         """
@@ -497,7 +505,78 @@ class ImpedanceHead(object):
         """
 
         return self.sensor_set.get_positions()
+    
+    def signals_to_impedance_2mic(self, signals, sr=None,
+                                  mics=None):
+        """
+        calculate impedance from measurement signals
+        """
+        if sr is None:
+            sr = self.sr
+        else:
+            assert self.sr==sr, 'Sample rates do not match' 
 
+        if mics is None:
+            mics = [0,1]
+
+        assert len(mics)==2, 'Microphone list should consist of two numbers' 
+
+        master_no = mics[0]
+        ch_no = mics[1]
+
+        t, ff = tfe(x=signals[:,master_no],
+                        y=signals[:,ch_no],
+                        Fs=self.sr, NFFT=self.nwind)
+        c, ff = cohere(x=signals[:,master_no],
+                           y=signals[:,ch_no],
+                           Fs=sr, NFFT=nwind)
+        
+        calmx_inv = self.get_calibration_matrix(from_mic=mics[0],
+                                                to_mic=mics[1])
+
+        zunk = ((calmx_inv[:,1,0] -
+                 t*calmx_inv[:,0,0])/
+                (-calmx_inv[:,1,1] +
+                 t*calmx_inv[:,0,1]))
+
+        return zunk
+
+    def get_calibration_matrix(self, from_mic=None, to_mic=0):
+        """
+        return the calibration matrix between two microphones.
+
+        the calibration matrix is defined as:
+                  +         +
+                  | a1,  b1 |
+            C^-1= |         |
+                  | a2,  b2 |
+                  +         +
+        such that 
+
+           +     +        +    +
+           | p'1 |        | p0 |
+           |     | = C^-1 |    |
+           | p'2 |        | u0 |
+           +     +        +    +
+
+        and that p'x are sensor measurements at positions x
+        """
+        
+        if from_mic is None:
+            from_mic = self.sensor_set.get_reference_num()
+
+        pos_from = self.get_sensor_positions()[from_mic]
+        pos_to = self.get_sensor_positions()[to_mic]
+        l = self.base_geometry.get_total_length()
+
+        gains = self.get_sensor_gains(to_mic)/self.get_sensor_gains(from_mic)
+        fg, gains, gcoh = self.sensor_set.get_gains()
+
+        cmx1 = self.base_geometry.transfer_mx_at_freq(f, from_pos=l-pos_from, to_pos=l)
+        cmx2 = self.base_geometry.transfer_mx_at_freq(f, from_pos=l-pos_to, to_pos=l)
+        calmx_inv = np.array([cmx1[0,:]*gains, cmx2[0,:]])
+
+        return calmx_inv
 
 class CalibrationSet(object):
     def __init__(self, calibrations=None,
