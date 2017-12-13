@@ -131,7 +131,7 @@ class CalibrationData(object):
             self.fstep = None
             self._frequencies = val
 
-        self.sr = np.max(val)/2
+        self.sr = np.max(val)*2
 
 
 class Sensor(object):
@@ -165,20 +165,23 @@ class Sensor(object):
         given by fvec
         """
         assert len(fvec) == len(gains)
-        self.gains_confidence = confidence
-        self.gains = gains
-        self.gains_fvec = fvec
-
+        self.calibration = CalibrationData(frequencies=fvec,
+                                           gains=gains,
+                                           confidence=confidence)
+        
     def get_gains(self):
         """
         returns the freq. vector, gains and confidence 
         for the sensor
         """
+        fvec = self.calibration.frequencies
+        gains = self.calibration.gains
+        conf = self.calibration.confidence
 
-        return self.gains_fvec, self.gains, self.gains_confidence
+        return fvec, gains, conf
 
-    def set_description(self, id='', 
-                        description='', 
+    def set_description(self, id='',
+                        description='',
                         sensor_type='Microphone',
                         brand='Unknown', model='', serial_number=''):
         """
@@ -214,7 +217,7 @@ class SensorList(object):
             self.sensor_list = []
         else:
             self.set_list(sensor_list)
-        self.sensor_dict = {ii:ss for ii,ss in enumerate(self.sensors)}
+        self.sensor_dict = {ii: ss for ii, ss in enumerate(self.sensors)}
         self.ref_sensor_num = 0
 
     def __getitem__(self, idx):
@@ -566,25 +569,30 @@ class ImpedanceHead(object):
         """
         calculate impedance from measurement signals
         """
-        if sr is None:
-            sr = self.sr
-        else:
-            assert self.sr==sr, 'Sample rates do not match' 
 
         if mics is None:
             mics = [0,1]
 
         assert len(mics)==2, 'Microphone list should consist of two numbers' 
+        for sno in mics:
+            cal_sr = self.sensor_set[sno].calibration.sr
+            assert self.sr == cal_sr, 'Sample rates do not match' 
+
+        if sr is None:
+            sr = cal_sr
+        
+        fstep = self.sensor_set[sno].calibration.fstep
+        nwind = int(np.round(float(sr)/fstep))
 
         master_no = mics[0]
         ch_no = mics[1]
 
-        t, ff = tfe(x=signals[:,master_no],
-                        y=signals[:,ch_no],
-                        Fs=self.sr, NFFT=self.nwind)
-        c, ff = cohere(x=signals[:,master_no],
-                           y=signals[:,ch_no],
-                           Fs=sr, NFFT=nwind)
+        t, ff = tfe(x=signals[:, master_no],
+                    y=signals[:, ch_no],
+                    Fs=self.sr, NFFT=self.nwind)
+        c, ff = cohere(x=signals[:, master_no],
+                       y=signals[:, ch_no],
+                       Fs=sr, NFFT=nwind)
         
         calmx_inv = self.get_calibration_matrix(from_mic=mics[0],
                                                 to_mic=mics[1])
@@ -744,7 +752,7 @@ class CalibrationSet(object):
 
         fvec = self.get_frequency_vector()
 
-        gg = np.zeros(len(fvec),dtype='complex')
+        gg = np.zeros(len(fvec), dtype='complex')
         allw = np.zeros(len(fvec))
         weight_vec = []
         for cal_nbr, cal in enumerate(self.calibrations):
@@ -755,8 +763,9 @@ class CalibrationSet(object):
         for cal_nbr, cal in enumerate(self.calibrations):
             weights = weight_vec[cal_nbr]/allw
             gg += (cal.gains[mic_nbr]) * weights
-
-        return gg, allw/(cal_nbr+1)
+        
+        weight_comb = np.max(np.array(weight_vec), axis=0)
+        return gg, weight_comb
 
     def calibrate_gains(self):
         """
