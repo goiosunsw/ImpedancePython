@@ -479,10 +479,10 @@ class Calibration(object):
             sensor_pos = self.sensor_list[sno].get_position()
             
             # calculate measured transfer functions
-            tz, ff = tfe(x=signals[:,ref_num],
-                         y=signals[:,sno], Fs=sr, NFFT=nwind)
-            cz, ff = cohere(x=signals[:,ref_num],
-                            y=signals[:,sno], Fs=sr, NFFT=nwind)
+            tz, ff = tfe(x=signals[:, ref_num],
+                         y=signals[:, sno], Fs=sr, NFFT=nwind)
+            cz, ff = cohere(x=signals[:, ref_num],
+                            y=signals[:, sno], Fs=sr, NFFT=nwind)
             # get theoretical transfer functions
             tzth = duct.pressure_transfer_func(freq=ff,
                              from_pos=ref_sensor_pos,
@@ -573,36 +573,37 @@ class ImpedanceHead(object):
         if mics is None:
             mics = [0,1]
 
-        assert len(mics)==2, 'Microphone list should consist of two numbers' 
+        assert len(mics) == 2, 'Microphone list should consist of two numbers' 
         for sno in mics:
             cal_sr = self.sensor_set[sno].calibration.sr
-            assert self.sr == cal_sr, 'Sample rates do not match' 
+            if sr is None:
+                sr = cal_sr
 
-        if sr is None:
-            sr = cal_sr
-        
+            assert sr == cal_sr, 'Sample rates do not match' 
+
         fstep = self.sensor_set[sno].calibration.fstep
         nwind = int(np.round(float(sr)/fstep))
 
-        master_no = mics[0]
+        ref_no = mics[0]
         ch_no = mics[1]
 
-        t, ff = tfe(x=signals[:, master_no],
+        t, ff = tfe(x=signals[:, ref_no],
                     y=signals[:, ch_no],
-                    Fs=self.sr, NFFT=self.nwind)
-        c, ff = cohere(x=signals[:, master_no],
+                    Fs=sr, NFFT=nwind)
+        c, ff = cohere(x=signals[:, ref_no],
                        y=signals[:, ch_no],
                        Fs=sr, NFFT=nwind)
         
-        calmx_inv = self.get_calibration_matrix(from_mic=mics[0],
-                                                to_mic=mics[1])
+        calmx_inv = self.get_calibration_matrix(from_mic=ref_no,
+                                                to_mic=ch_no)
 
-        zunk = ((calmx_inv[:,1,0] -
-                 t*calmx_inv[:,0,0])/
-                (-calmx_inv[:,1,1] +
-                 t*calmx_inv[:,0,1]))
-
-        return zunk
+        zunk = ((calmx_inv[1, 0, :] -
+                 t*calmx_inv[0, 0, :]) /
+                (-calmx_inv[1, 1, :] +
+                 t*calmx_inv[0, 1, :]))
+        
+        # FIXME: why is the impedance inverted??
+        return 1/zunk
 
     def get_calibration_matrix(self, from_mic=None, to_mic=0):
         """
@@ -628,15 +629,22 @@ class ImpedanceHead(object):
         if from_mic is None:
             from_mic = self.sensor_set.get_reference_num()
 
-        pos_from = self.get_sensor_positions()[from_mic]
-        pos_to = self.get_sensor_positions()[to_mic]
+        from_sensor = self.sensor_set[from_mic]
+        to_sensor = self.sensor_set[to_mic]
+        pos_from = from_sensor.position
+        pos_to = to_sensor.position
         l = self.base_geometry.get_total_length()
 
-        gains = self.get_sensor_gains(to_mic)/self.get_sensor_gains(from_mic)
-        fg, gains, gcoh = self.sensor_set.get_gains()
+        gains = to_sensor.calibration.gains/from_sensor.calibration.gains
 
-        cmx1 = self.base_geometry.transfer_mx_at_freq(f, from_pos=l-pos_from, to_pos=l)
-        cmx2 = self.base_geometry.transfer_mx_at_freq(f, from_pos=l-pos_to, to_pos=l)
+        f = from_sensor.calibration.frequencies
+        cmx1 = self.base_geometry.transfer_mx_at_freq(f,
+                                                      from_pos=pos_from,
+                                                      to_pos=l)
+        f = to_sensor.calibration.frequencies
+        cmx2 = self.base_geometry.transfer_mx_at_freq(f,
+                                                      from_pos=pos_to,
+                                                      to_pos=l)
         calmx_inv = np.array([cmx1[0,:]*gains, cmx2[0,:]])
 
         return calmx_inv
