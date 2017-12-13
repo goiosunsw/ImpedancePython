@@ -77,7 +77,62 @@ def calculate_impedance_from_pressure(signals, sr,
             z0th.append(duct.get_input_impedance_at_freq(f, from_pos=l))
 
         calmx_inv = np.array(calmx_inv)
+
+class CalibrationData(object):
+    """
+    Per-frequency calibration data
+    """
+
+    difftol = np.spacing(1)*2
+    
+    def __init__(self, frequencies=None,
+                 gains=None, sr=None, confidence=None, 
+                 fstep=None):
+
+        self._frequencies = None
+        if frequencies is not None:
+            self.frequencies = frequencies
+        else:
+            self.sr = float(sr)
+            self.fstep = float(fstep)
+            frequencies = self.frequencies
         
+        if gains is not None:
+            assert len(frequencies) == len(gains)
+            self.gains = gains
+        else: 
+            self.gains = np.ones(len(frequencies))
+
+        if confidence is not None:
+            assert len(frequencies) == len(confidence)
+            self.confidence = confidence
+        else:
+            self.confidence = np.ones(len(frequencies))
+        # for later:
+        self.admittance = np.zeros(len(frequencies))
+    
+    @property
+    def frequencies(self):
+        if self._frequencies is None:
+            maxfreq = self.sr/2
+            npoints = int(np.round(maxfreq/self.fstep))+1
+            return np.linspace(0, maxfreq, num=npoints)
+        else:
+            return self._frequencies
+
+    @frequencies.setter
+    def frequencies(self, val):
+        fdiff = np.diff(val)
+        meandiff = np.mean(fdiff)
+        if np.all(np.abs(fdiff/meandiff-1) < self.difftol):
+            self.fstep = meandiff
+            self._frequencies = None
+        else:
+            self.fstep = None
+            self._frequencies = val
+
+        self.sr = np.max(val)/2
+
 
 class Sensor(object):
     """
@@ -85,9 +140,9 @@ class Sensor(object):
     """
 
     def __init__(self, position=0.0,
-                 pressure_sensitivity = 1.0,
-                 flow_sensitivity = 0.0,
-                 sensor_type = 'Microphone', id=''):
+                 pressure_sensitivity=1.0,
+                 flow_sensitivity=0.0,
+                 sensor_type='Microphone', id=''):
         """
         initialise the sensor parameters:
 
@@ -109,7 +164,7 @@ class Sensor(object):
         set the sensor gains and confidences at the frequencies
         given by fvec
         """
-        assert len(fvec)==len(gains)
+        assert len(fvec) == len(gains)
         self.gains_confidence = confidence
         self.gains = gains
         self.gains_fvec = fvec
@@ -578,6 +633,7 @@ class ImpedanceHead(object):
 
         return calmx_inv
 
+
 class CalibrationSet(object):
     def __init__(self, calibrations=None,
                  impedance_head=None,
@@ -745,7 +801,7 @@ class CalibrationSet(object):
         vectors
         """
         sr = self.get_sampling_rate()
-        return np.linspace(0,sr,int(self.nwind/2)+1)
+        return np.linspace(0,sr/2,int(self.nwind/2)+1)
 
     def get_sensor_positions(self):
         """
