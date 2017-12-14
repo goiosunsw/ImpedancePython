@@ -12,6 +12,7 @@ import matplotlib.pyplot as pl
 import ImpedanceSynthesiser as imps
 import scipy.signal as sig
 import warnings
+import xmltodict
 
 
 def tfe_sig(y, x, *args, **kwargs):
@@ -78,12 +79,72 @@ def calculate_impedance_from_pressure(signals, sr,
 
         calmx_inv = np.array(calmx_inv)
 
+def load_head(filename):
+    """
+    loads impedance head data from a xml file
+    """
+    # build a hierarchical dictionary
+    with open(filename,'r') as fid:
+        head_dict = xmltodict.parse(fid)['impedance_head']
+
+    head = ImpedanceHead()
+
+    sensor_data=head_dict['sensors']
+    sensor_set=SensorList()
+    for i,s in enumerate(sensor_data):
+        
+        sensor = Sensor(id=s['id'],
+                        pressure_sensitivity=float(s['pressure_sensitivity']),
+                        flow_sensitivity=float(s['flow_sensitivity']),
+                        position=float(s['position']))
+        sensor.set_description(serial_number=s['serial_number'],
+                               brand=s['brand'],
+                               model=s['model'],
+                               description=s['serial_number'])
+
+        calib_data = s['calibration']
+        fvec = []
+        gains = []
+        conf = []
+        for c in calib_data['data']:
+            fvec.append(float(c['freq']))
+            try:
+                gains.append(complex(c['gain']))
+            except ValueError:
+                gains.append(complex(np.nan))
+            conf.append(float(c['confidence']))
+
+        sensor.set_gains(fvec=fvec, gains=gains, confidence=conf)
+        sensor_set.append(sensor)
+
+    duct_dict = head_dict['duct']
+    world = imps.AcousticWorld(temp=float(duct_dict['temperature']),
+                               humid=float(duct_dict['humidity']),
+                               press=float(duct_dict['pressure']))
+    duct = imps.Duct(world=world)
+    try:
+        el_sort = sorted(duct_dict['elements'], 
+                         key=lambda x:float(x['position']))
+    except TypeError:
+        el_sort = [duct_dict['elements']]
+
+    for el in el_sort:
+        # el = duct_dict['elements']
+        eel = el['straight_duct']
+        element = imps.StraightDuct(length=float(eel['length']),
+                                    radius=float(eel['radius']))
+        duct.append_element(element)
+
+    return ImpedanceHead(duct=duct, sensor_set=sensor_set)
+
+
+
 class CalibrationData(object):
     """
     Per-frequency calibration data
     """
 
-    difftol = np.spacing(1)*2
+    difftol = 0.0001
     
     def __init__(self, frequencies=None,
                  gains=None, sr=None, confidence=None, 
@@ -165,9 +226,9 @@ class Sensor(object):
         given by fvec
         """
         assert len(fvec) == len(gains)
-        self.calibration = CalibrationData(frequencies=fvec,
-                                           gains=gains,
-                                           confidence=confidence)
+        self.calibration = CalibrationData(frequencies=np.array(fvec),
+                                           gains=np.array(gains),
+                                           confidence=np.array(confidence))
         
     def get_gains(self):
         """
@@ -601,9 +662,14 @@ class ImpedanceHead(object):
                  t*calmx_inv[0, 0, :]) /
                 (-calmx_inv[1, 1, :] +
                  t*calmx_inv[0, 1, :]))
+
+        conf = np.min([c,
+                       self.sensor_set[ref_no].calibration.confidence,
+                       self.sensor_set[ch_no].calibration.confidence],
+                      axis=0)
         
         # FIXME: why is the impedance inverted??
-        return 1/zunk
+        return 1/zunk, conf
 
     def get_calibration_matrix(self, from_mic=None, to_mic=0):
         """
@@ -649,6 +715,49 @@ class ImpedanceHead(object):
 
         return calmx_inv
 
+    def save(self,filename):
+        """
+        saves impedance head data to a xml file
+        """
+        # build a hierarchical dictionary
+        sensor_data = []
+        for i,s in enumerate(self.sensor_set):
+            calib_data = []
+            cal_obj = self.sensor_set[i].calibration
+            fvec = cal_obj.frequencies
+            for ii,f in enumerate(fvec):
+                calib_data.append({'freq': f,
+                                   'gain': cal_obj.gains[ii],
+                                   'confidence': cal_obj.confidence[ii]})
+
+            sensor_data.append({'id':s.id,
+                                'brand':s.brand,
+                                'model':s.model,
+                                'serial_number':s.serial_number,
+                                'pressure_sensitivity':s.pressure_sens,
+                                'flow_sensitivity':s.flow_sens,
+                                'position':s.position,
+                                'serial_number':s.serial_number,
+                                'calibration':{'sr':cal_obj.sr,
+                                               'data':calib_data}})
+            duct = self.base_geometry
+            el_data = []
+            for ii,el in enumerate(duct.elements):
+                el_data.append({'position': duct.element_positions[ii],
+                                'straight_duct': {'radius': el.radius,
+                                                 'length': el.length}})
+
+            duct_dict = {'temperature':duct.world.temperature,
+                         'humidity': duct.world.humidity,
+                         'pressure': duct.world.pressure,
+                         'elements':el_data,
+                         'termination':duct.termination.__str__}
+
+            imp_dict = {'impedance_head':{'duct':duct_dict,
+                                          'sensors':sensor_data}}
+
+            with open(filename,'w') as fid:
+                fid.write(xmltodict.unparse(imp_dict))
 
 class CalibrationSet(object):
     def __init__(self, calibrations=None,
