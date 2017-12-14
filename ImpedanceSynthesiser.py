@@ -213,11 +213,12 @@ class DuctSection(object):
 
         # set dummy variable to zero if z0 is infinite
         # (this will prevent nan for infinite impedances)
-        one = np.isfinite(z_end)
+        one = np.isfinite(z_end).astype('complex')
         z_end[np.logical_not(one)] = 1.
-        p_st = tmx[0, 0]*z_end + tmx[0, 1]*one
-        u_st = tmx[1, 0]*z_end + tmx[1, 1]*one
-        return p_st/u_st
+        p_st = tmx[0, 0, :]*z_end + tmx[0, 1, :]*one
+        u_st = tmx[1, 0, :]*z_end + tmx[1, 1, :]*one
+        z = p_st/u_st
+        return z
 
 #        if np.isinf(p_st):
 #            if np.isinf(u_st):
@@ -537,7 +538,7 @@ class TerminationImpedance(DuctSection):
         returns the value of the reflection coefficient (complex)
         at a given frequency
         """
-        return -np.ones_like(freq)
+        return -np.ones_like(freq).astype('complex')
         # return r
         # if r.shape == 0:
         #     return r[()]
@@ -644,7 +645,8 @@ class PortImpedance(object):
             newfig = False
 
         fvec = np.linspace(fmin, fmax, npoints)
-        zvec = np.array([self.get_input_impedance_at_freq(f) for f in fvec])
+        # zvec = np.array([self.get_input_impedance_at_freq(f) for f in fvec])
+        zvec = self.get_input_impedance_at_freq(fvec)
         
         if scale_type=='db':
             y = 20*np.log10(np.abs(zvec))
@@ -751,10 +753,11 @@ class Duct(PortImpedance):
         elements = reversed(self.elements[el_nbr+1:])
         for el in elements:
             # transfer matrices also need to be reversed!
-            z = el._chain_impedance_at_freq(z, f, to_pos=0.0, reverse=True)
+            z = el._chain_impedance_at_freq(z, f,  reverse=True)
         el = self.elements[el_nbr]
         rel_pos = from_pos - self.element_positions[el_nbr]
         z = el._chain_impedance_at_freq(z, f, from_pos=rel_pos, reverse=True)
+ 
 
         return z*self.char_impedance
 
@@ -850,8 +853,13 @@ class Duct(PortImpedance):
 
             el = self.elements[end_nb]
             trans_mx = el.normalized_two_point_transfer_mx_at_freq
-            mx = np.dot(mx, trans_mx(from_pos=0.0, to_pos=to_pos_rel,
-                                     freq=freq))
+            mx = np.matmul(mx.swapaxes(0,2), 
+                           trans_mx(from_pos=0.0, 
+                                    to_pos=to_pos_rel,
+                                    freq=freq).swapaxes(0,2)).swapaxes(0,2)
+        
+        # FIXME: not good when from and to are in the same duct and there are
+        # further ducts downstream
         return mx
 
     def transfer_mx_at_freq(self, freq=0.0, from_pos=0.0, to_pos=None):
