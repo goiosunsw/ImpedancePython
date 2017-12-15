@@ -746,6 +746,47 @@ class Duct(PortImpedance):
             r = el._chain_reflection_coeff_at_freq(r, f)
         return r
 
+    def iter_elements_in_interval(self, from_pos=0.0, 
+                                  to_pos=None,
+                                  reverse=False):
+        """
+        Return the list of elements between two positions
+        along the duct, along with starting and ending 
+        position in the duct start and end positions default to 
+        0. and None if the complete length of the segment 
+        is in the interval
+        """
+        if to_pos is None:
+            to_pos=self.get_total_length()
+
+        edges = [from_pos, to_pos]
+
+        from_nbr, from_el = self.get_element_at_position(min(edges))
+        to_nbr, to_el = self.get_element_at_position(max(edges))
+        if reverse:
+            for el_nbr in range(to_nbr,from_nbr-1,-1):
+                el = self.elements[el_nbr]
+                el_from_pos = max(edges) - self.element_positions[el_nbr]
+                el_len = el.get_length()
+                if el_from_pos > el_len:
+                    el_from_pos = el_len
+                el_to_pos = min(edges) - self.element_positions[el_nbr]
+                if el_to_pos < 0.:
+                    el_to_pos = 0.
+                yield el_nbr, el, el_from_pos, el_to_pos 
+        else:
+            for el_nbr in range(from_nbr,to_nbr+1):
+                el = self.elements[el_nbr]
+                el_from_pos = min(edges) - self.element_positions[el_nbr]
+                if el_from_pos < 0:
+                    el_from_pos = 0.
+                el_len = el.get_length()
+                el_to_pos = max(edges) - self.element_positions[el_nbr]
+                if el_to_pos > el_len:
+                    el_to_pos = el_len
+                yield el_nbr, el, el_from_pos, el_to_pos 
+
+
     def get_input_impedance_at_freq(self, f, from_pos=0.0):
         el_nbr, el = self.get_element_at_position(from_pos)
         z = self.termination._get_impedance_at_freq(f)
