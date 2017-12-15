@@ -850,7 +850,8 @@ class Duct(PortImpedance):
         return (self.element_positions[-1] + self.elements[-1].get_length())
 
     def normalized_transfer_mx_at_freq(self, freq=0.0,
-                                       from_pos=0.0, to_pos=None):
+                                       from_pos=0.0, to_pos=None,
+                                       reverse=True):
         """ Returns the pressure/ flow transfer matrix between
         two positions of the duct
 
@@ -862,48 +863,33 @@ class Duct(PortImpedance):
             from_pos: position of source from upstream
             to_pos: position of source from upstream
             (negative position means relative to downstream)
+            reverse: whether to chain the segments in reverse 
+                    order
 
         returns:
             2x2 matrix M such that:
                 [p, Zc u]_from = [m11,m12; m21, m22] [p, Zc u]_to
         """
-
-    # sys.stderr.write('{}\n'.format(to_pos))
-        if to_pos is None:
-            total_length = self.get_total_length()
-            # sys.stderr.write('\nsetting position to {}\n'.format(total_length))
-            end_pos = total_length
-        else:
-            end_pos = to_pos
-
-        start_nb, start_element = self.get_element_at_position(from_pos)
-        end_nb, end_element = self.get_element_at_position(end_pos)
-        from_pos_rel = from_pos - self.element_positions[start_nb]
-        to_pos_rel = end_pos - self.element_positions[end_nb]
-
-        start_trans_mx = start_element.normalized_two_point_transfer_mx_at_freq
-        if start_nb == end_nb:
-            mx = start_trans_mx(from_pos=from_pos_rel,
-                                to_pos=to_pos_rel,
-                                freq=freq)
-        else:
-            mx = start_trans_mx(from_pos=from_pos_rel,
-                                freq=freq)
-            for el in self.elements[start_nb+1:end_nb]:
-                mx = np.dot(mx, el.normalized_transfer_mx_at_freq(freq=freq))
-
-            el = self.elements[end_nb]
-            trans_mx = el.normalized_two_point_transfer_mx_at_freq
-            mx = np.matmul(mx.swapaxes(0,2), 
-                           trans_mx(from_pos=0.0, 
-                                    to_pos=to_pos_rel,
-                                    freq=freq).swapaxes(0,2)).swapaxes(0,2)
         
+        mx = np.tile(np.identity(2),(len(freq),1,1)).swapaxes(0,2)
+
+        for el_nbr, el, el_st_pos, el_end_pos in \
+            self.iter_elements_in_interval(from_pos=from_pos, to_pos=to_pos,
+                                           reverse=reverse):
+            trans_mx = el.normalized_two_point_transfer_mx_at_freq
+            #trans_mx = tmx(freq, from_pos=el_st_pos,
+            #               to_pos=el_end_pos)
+            mx = np.matmul(mx.swapaxes(0,2), 
+                           trans_mx(from_pos=el_st_pos, 
+                                    to_pos=el_end_pos,
+                                    freq=freq).swapaxes(0,2)).swapaxes(0,2)
+    
         # FIXME: not good when from and to are in the same duct and there are
         # further ducts downstream
         return mx
 
-    def transfer_mx_at_freq(self, freq=0.0, from_pos=0.0, to_pos=None):
+    def transfer_mx_at_freq(self, freq=0.0, from_pos=0.0, to_pos=None,
+                                       reverse=True):
         """ Returns the pressure/ flow transfer matrix between
         two positions of the duct
 
