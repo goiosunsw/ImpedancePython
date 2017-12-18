@@ -26,16 +26,30 @@ def tfe_sig(y, x, *args, **kwargs):
 try:
     from matplotlib.mlab import psd, csd, cohere
 
-    def tfe(y, x, *args, **kwargs):
+    def tfe(y, x, source=None, *args, **kwargs):
         """estimate transfer function from x to y,
            see csd for calling convention"""
-        sxy, fxy = csd(y, x, *args, **kwargs)
-        sxx, fxx = psd(x, *args, **kwargs)
-        return sxy / sxx, fxx
-
+        if source is None:
+            sxy, fxy = csd(y, x, *args, **kwargs)
+            sxx, fxx = psd(x, *args, **kwargs)
+            return sxy / sxx, fxx
+        else:
+            ssx, fsx = csd(x, source, *args, **kwargs)
+            # sss, _   = psd(s, *args, **kwargs)
+            ssy, fsy = csd(y, source, *args, **kwargs)
+            return ssy / ssx, fsx 
 
 except ImportError:
     tfe = tfe_sig
+
+def coherence(y, x, source=None, *args, **kwargs):
+    if source is None:
+        return cohere(y, x, *args, **kwargs)
+    else:
+        cx, fx = cohere(x, source, *args, **kwargs)
+        cy, _ = cohere(y, source, *args, **kwargs)
+        coh = np.min([cx,cy],axis=0)
+        return coh, fx
 
 
 def calculate_impedance_from_pressure(signals, sr, 
@@ -482,10 +496,13 @@ class Calibration(object):
     def get_slave_sensors(self):
         return self.sensor_list.get_slave_list()
 
-    def add_calibration_signals(self, signals, sr=1.0):
+    def add_calibration_signals(self, signals, source=None, sr=1.0):
         """
         add a calibration set, including (maybe) the input signal 
         and the measurements by each sensor.
+
+        Argument source is used to provide the noise source to improve 
+        signal to noise ratios
 
         Number of channels in "sensors" must match number of sensors 
         in measurement object: 
@@ -501,11 +518,12 @@ class Calibration(object):
 
 
         # self.load_measurements.append(signals)
-        f, gains, coh, _, _ = self.calculate_impedance(signals)
+        f, gains, coh, _, _ = self.calculate_impedance(signals, 
+                                                       source=source)
         self.gains = gains
         self.coherence = coh
     
-    def calculate_impedance(self, signals):
+    def calculate_impedance(self, signals, source=None):
         """
         calculates the uncorrected impedance
 
@@ -541,9 +559,12 @@ class Calibration(object):
             
             # calculate measured transfer functions
             tz, ff = tfe(x=signals[:, ref_num],
-                         y=signals[:, sno], Fs=sr, NFFT=nwind)
-            cz, ff = cohere(x=signals[:, ref_num],
-                            y=signals[:, sno], Fs=sr, NFFT=nwind)
+                         y=signals[:, sno], source=source,
+                         Fs=sr, NFFT=nwind)
+            cz, ff = coherence(x=signals[:, ref_num],
+                               y=signals[:, sno], 
+                               source=source,
+                               Fs=sr, NFFT=nwind)
             # get theoretical transfer functions
             tzth = duct.pressure_transfer_func(freq=ff,
                              from_pos=ref_sensor_pos,
@@ -625,10 +646,14 @@ class ImpedanceHead(object):
 
         return self.sensor_set.get_positions()
     
-    def signals_to_impedance_2mic(self, signals, sr=None,
+    def signals_to_impedance_2mic(self, signals, source=None,
+                                  sr=None,
                                   mics=None):
         """
         calculate impedance from measurement signals
+
+        argument "source" provides a source signal to improve 
+        signal to noise ratio of transfer functions
         """
 
         if mics is None:
@@ -650,9 +675,11 @@ class ImpedanceHead(object):
 
         t, ff = tfe(x=signals[:, ref_no],
                     y=signals[:, ch_no],
+                    source=source,
                     Fs=sr, NFFT=nwind)
-        c, ff = cohere(x=signals[:, ref_no],
+        c, ff = coherence(x=signals[:, ref_no],
                        y=signals[:, ch_no],
+                       source=source,
                        Fs=sr, NFFT=nwind)
         
         calmx_inv = self.get_calibration_matrix(from_mic=ref_no,
@@ -829,14 +856,18 @@ class CalibrationSet(object):
 
         return cal
 
-    def add_load_with_measurements(self, load, signals, sr=None):
+    def add_load_with_measurements(self, load, signals, 
+                                   source=None, sr=None):
         """
         adds a calibration load with the matching measurements
+
+        provide source signal to improve signal to noise ratio
+        in transfer function estimates
         """
         cal = self.add_load(load)
         if sr is None:
             sr = self.get_sampling_rate()
-        cal.add_calibration_signals(signals,sr=sr)
+        cal.add_calibration_signals(signals, source=source, sr=sr)
 
     def set_sensors(self, sensor_list):
         """
