@@ -157,3 +157,106 @@ class ImpedanceMeasurement(object):
         freqIncr = np.squeeze(ppp['freqIncr'])
 
         self.buildFreqVect(freqLo, freqIncr)
+
+def lscov(a, b, w):
+    """
+    calculates the weighted least squared solution to
+      a.x = b
+    given the weights w
+    """
+    w = np.sqrt(np.diag(w))
+    Aw = np.dot(w,a)
+    Bw = np.dot(b,w)
+    return np.linalg.lstsq(Aw, Bw)
+
+def analyseinput(Input, Parameters, measType, countLoops=0):
+    """
+    analyseinput takes the spectra and determines pressure and flow (u) to
+    save in Analysis structure
+    """
+
+    noiseCalculated = Input['numCycles'] >= 8
+    #  calculate A and b matrices
+    A = Parameters['A'].squeeze();
+    harmLo = Parameters['harmLo'].squeeze()
+    harmHi = Parameters['harmHi'].squeeze()
+    nChannelFirst = Parameters['nChannelFirst'].squeeze()
+    micSpacing = Paramters['micSpacing'].squeeze()
+    nMics = len(micSpacing)
+    fVec = Parameters['frequencyVector'].squeeze()
+
+
+
+    meanSpectrum = Input['meanSpectrum'].squeeze()
+    totalSpectrum = Input['totalSpectrum'].squeeze()
+    spectralError = Input['spectralError'].squeeze()
+
+    spectralError = spectralError[harmLo:harmHi, nChannelFirst:nMics]
+
+    if noiseCalculated: 
+        # Fit a function of the form Af^n to the noise data,
+        # and replace the noise data with the (smooth) function.
+        fitData = [np.ones(fVec.shape), np.log(fVec)]
+        coeff = np.linalg.lstsq(fitData,np.log(spectralError))
+        spectralError = np.exp(fitData*coeff)
+        sigmaVariable = np.transpose(spectralError, axes=[1,2,0])
+    else:
+        # otherwise, choose a noise function of f^(-0.5)
+        sigmaVariable = (fVec**(-0.5) *
+                         np.ones((1,spectralError.shape[1])))
+        sigmaVariable = np.transpose(sigmaVariable, axes=[1,2,0])
+
+    if measType == 'Averaged':
+        b = np.transpose(meanSpectrum[harmLo:harmHi,nChannelFirst:nMics],
+            axes=[1,2,0])
+    elif measType == 'Individual':
+        if countLoops:
+            # reorder the totalSpectrum vector to match meanSpectrum
+            if nMics == 1:
+                tempSpectrum =\
+                    totalSpectrum[harmLo:harmHi, countLoops-1, 0];
+            elif nMics == 2:
+                tempSpectrum =\
+                    [totalSpectrum[harmLo: harmHi, countLoops-1, 0],\
+                    totalSpectrum[harmLo: harmHi, countLoops-1, 1]]
+            else:
+                tempSpectrum =\
+                    [totalSpectrum[harmLo: harmHi, countLoops-1, 0],\
+                    totalSpectrum[harmLo: harmHi, countLoops-1, 1],\
+                    totalSpectrum[harmLo: harmHi, countLoops-1, 2]]
+      
+        b = np.transpose(tempSpectrum, axes=[1,2,0])
+
+    # initialise p, u, deltap and deltau
+    p = np.zeros(A.shape[2],1)
+    deltap = np.zeros(p.shape)
+    u = np.zeros(p.shape)
+    deltau = np.zeros(p.shape)
+    for freqCount in range(A.shape[2]): # length of frequency vector
+        # Calculate the covariant matrix by putting the elements of
+        # sigmaVariable along the diagonal
+        covar = np.diag(sigmaVariable[:,:,freqCount]**2)
+        # if only two mics, calculate x using backslash operator
+        # i.e. solve A*x = B for x
+        if nMics == 1:
+            x = np.linalg.lstsq(A[:,:,freqCount],b[:,:,freqCount])
+            # matrix is not square so use pseudoinverse
+            Ainv = np.linalg.pinv(A[:,:,freqCount])
+        elif nMics == 2:
+            x = np.linalg.lstsq(A[:,:,freqCount],b[:,:,freqCount])
+            Ainv = np.linalg.inv(A[:,:,freqCount])
+        else:
+            # otherwise, use a weighted least-squares to determine x
+            # weighted least squares solution to A*x = b with weighting covar
+            x = lscov(A[:,:,freqCount], b[:,:,freqCount], covar)
+            Ainv = np.linalg.pinv(A[:,:,freqCount])
+        # Use the inverse (or pseudoinverse) to calculate dx
+        dx = np.sqrt(np.diag(Ainv*covar*Ainv.T))
+        # Calculate the impedance and its error
+        Z0 = Parameters.Z0
+        p[freqCount] = x[0]
+        u[freqCount] = x[1] / Z0
+        deltap[freqCount] = dx[0]
+        deltau[freqCount] = dx[1] / Z0
+
+    return dict(p=p, u=u, deltap=deltap, deltau=deltau, z0=Z0)
