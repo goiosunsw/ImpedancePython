@@ -169,20 +169,26 @@ def lscov(a, b, w):
     Bw = np.dot(b,w)
     return np.linalg.lstsq(Aw, Bw)
 
-def analyseinput(Input, Parameters, measType, countLoops=0):
+def analyseinput(Input, Parameters, 
+                 measType='Averaged', 
+                 countLoops=0):
     """
     analyseinput takes the spectra and determines pressure and flow (u) to
     save in Analysis structure
     """
 
-    noiseCalculated = Input['numCycles'] >= 8
+    numCycles = Input['numCycles'].squeeze()
+    noiseCalculated = numCycles[0] >= 8
     #  calculate A and b matrices
     A = Parameters['A'].squeeze();
     harmLo = Parameters['harmLo'].squeeze()
     harmHi = Parameters['harmHi'].squeeze()
     nChannelFirst = Parameters['nChannelFirst'].squeeze()
-    micSpacing = Paramters['micSpacing'].squeeze()
+    micSpacing = Parameters['micSpacing'].squeeze()
     nMics = len(micSpacing)
+    # shouldn't it be...
+    # nChannelLast = nChannelFirst + nMics
+    nChannelLast = nMics
     fVec = Parameters['frequencyVector'].squeeze()
 
 
@@ -191,69 +197,73 @@ def analyseinput(Input, Parameters, measType, countLoops=0):
     totalSpectrum = Input['totalSpectrum'].squeeze()
     spectralError = Input['spectralError'].squeeze()
 
-    spectralError = spectralError[harmLo:harmHi, nChannelFirst:nMics]
+    spectralError = spectralError[harmLo:harmHi+1, nChannelFirst-1:nChannelLast]
 
     if noiseCalculated: 
         # Fit a function of the form Af^n to the noise data,
         # and replace the noise data with the (smooth) function.
-        fitData = [np.ones(fVec.shape), np.log(fVec)]
-        coeff = np.linalg.lstsq(fitData,np.log(spectralError))
-        spectralError = np.exp(fitData*coeff)
-        sigmaVariable = np.transpose(spectralError, axes=[1,2,0])
+        fitData = np.array([np.ones(fVec.shape), np.log(fVec)]).T
+        coeff,_,_,_ = np.linalg.lstsq(fitData,np.log(spectralError))
+        spectralError = np.exp(np.dot(fitData, coeff))
+        sigmaVariable = np.transpose(np.array([spectralError]),
+                                     axes=[2,0,1])
     else:
         # otherwise, choose a noise function of f^(-0.5)
         sigmaVariable = (fVec**(-0.5) *
                          np.ones((1,spectralError.shape[1])))
-        sigmaVariable = np.transpose(sigmaVariable, axes=[1,2,0])
+        sigmaVariable = np.transpose(np.array([sigmaVariable]), 
+                                     axes=[2,0,1])
 
     if measType == 'Averaged':
-        b = np.transpose(meanSpectrum[harmLo:harmHi,nChannelFirst:nMics],
-            axes=[1,2,0])
+        meanSpecRed = meanSpectrum[harmLo:harmHi+1,nChannelFirst-1:nChannelLast]
+        b = np.transpose(np.array([meanSpecRed]),
+                         axes=[2,0,1])
     elif measType == 'Individual':
         if countLoops:
             # reorder the totalSpectrum vector to match meanSpectrum
             if nMics == 1:
                 tempSpectrum =\
-                    totalSpectrum[harmLo:harmHi, countLoops-1, 0];
+                    totalSpectrum[harmLo:harmHi+1, countLoops-1, 0];
             elif nMics == 2:
                 tempSpectrum =\
-                    [totalSpectrum[harmLo: harmHi, countLoops-1, 0],\
-                    totalSpectrum[harmLo: harmHi, countLoops-1, 1]]
+                    [totalSpectrum[harmLo:harmHi+1, countLoops-1, 0],\
+                     totalSpectrum[harmLo:harmHi+1, countLoops-1, 1]]
             else:
                 tempSpectrum =\
-                    [totalSpectrum[harmLo: harmHi, countLoops-1, 0],\
-                    totalSpectrum[harmLo: harmHi, countLoops-1, 1],\
-                    totalSpectrum[harmLo: harmHi, countLoops-1, 2]]
+                    [totalSpectrum[harmLo: harmHi+1, countLoops-1, 0],\
+                    totalSpectrum[harmLo: harmHi+1, countLoops-1, 1],\
+                    totalSpectrum[harmLo: harmHi+1, countLoops-1, 2]]
       
-        b = np.transpose(tempSpectrum, axes=[1,2,0])
+        b = np.transpose(tempSpectrum, axes=[2,0,1])
 
     # initialise p, u, deltap and deltau
-    p = np.zeros(A.shape[2],1)
-    deltap = np.zeros(p.shape)
-    u = np.zeros(p.shape)
-    deltau = np.zeros(p.shape)
+    p = np.zeros((A.shape[2],1),dtype='complex')
+    deltap = np.zeros_like(p)
+    u = np.zeros_like(p)
+    deltau = np.zeros_like(p)
     for freqCount in range(A.shape[2]): # length of frequency vector
         # Calculate the covariant matrix by putting the elements of
         # sigmaVariable along the diagonal
-        covar = np.diag(sigmaVariable[:,:,freqCount]**2)
+        covar = (sigmaVariable[:,0,freqCount]**2)
         # if only two mics, calculate x using backslash operator
         # i.e. solve A*x = B for x
         if nMics == 1:
-            x = np.linalg.lstsq(A[:,:,freqCount],b[:,:,freqCount])
+            x,_,_,_ = np.linalg.lstsq(A[:,:,freqCount],b[:,:,freqCount])
             # matrix is not square so use pseudoinverse
             Ainv = np.linalg.pinv(A[:,:,freqCount])
         elif nMics == 2:
-            x = np.linalg.lstsq(A[:,:,freqCount],b[:,:,freqCount])
+            x,_,_,_ = np.linalg.lstsq(A[:,:,freqCount],b[:,:,freqCount])
             Ainv = np.linalg.inv(A[:,:,freqCount])
         else:
             # otherwise, use a weighted least-squares to determine x
             # weighted least squares solution to A*x = b with weighting covar
-            x = lscov(A[:,:,freqCount], b[:,:,freqCount], covar)
+            x,_,_,_ = lscov(A[:,:,freqCount], b[:,0,freqCount], covar)
             Ainv = np.linalg.pinv(A[:,:,freqCount])
         # Use the inverse (or pseudoinverse) to calculate dx
-        dx = np.sqrt(np.diag(Ainv*covar*Ainv.T))
+        dx = np.sqrt(np.diag(np.dot(np.dot(Ainv, np.diag(covar)),
+                             Ainv.T)))
         # Calculate the impedance and its error
-        Z0 = Parameters.Z0
+        Z0 = Parameters['Z0'].squeeze()
         p[freqCount] = x[0]
         u[freqCount] = x[1] / Z0
         deltap[freqCount] = dx[0]
