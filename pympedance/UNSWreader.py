@@ -15,7 +15,7 @@ import sys
 import os
 import numpy as np
 from scipy.io import matlab
-from Impedance import Impedance
+from ._impedance import Impedance
 
 
 def read_UNSW_impedance(filename=None, paramfile=None,

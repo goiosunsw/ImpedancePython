@@ -9,7 +9,7 @@ Uses global parameters contained in phys_params
 
 import numpy as np
 import matplotlib.pyplot as pl
-import ImpedanceSynthesiser as imps
+from . import Synthesiser as imps
 import scipy.signal as sig
 import warnings
 import xmltodict
