@@ -8,7 +8,7 @@ Uses global parameters contained in phys_params
 import numpy as np
 import sys
 import matplotlib.pyplot as pl
-import Impedance as imp
+from .Impedance import Impedance as imp
 from copy import copy
 
 phys_params = {'speed_of_sound': 343.2,
