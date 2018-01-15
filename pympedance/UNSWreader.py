@@ -16,6 +16,7 @@ import os
 import numpy as np
 from scipy.io import matlab
 from ._impedance import Impedance
+from copy import copy
 
 
 def read_UNSW_impedance(filename=None, paramfile=None,
@@ -270,3 +271,86 @@ def analyseinput(Input, Parameters,
         deltau[freqCount] = dx[1] / Z0
 
     return dict(p=p, u=u, deltap=deltap, deltau=deltau, z0=Z0)
+
+
+def recalc_calibration(InfPipe=None, 
+                       InfImp=None,
+                       InfFlange=None,
+                       Parameters=None):
+    """
+    recalculate calibration parameters from experimental calibration
+    measurements
+    """
+
+    
+    A_old = Parameters['A'].squeeze()
+    A = copy(A_old)
+    z0 = Parameters['Z0'].squeeze()
+    harmLo = Parameters['harmLo'].squeeze()
+    harmHi = Parameters['harmHi'].squeeze()
+    nChannelFirst = Parameters['nChannelFirst'].squeeze()
+    micSpacing = Parameters['micSpacing'].squeeze()
+    nMics = len(micSpacing)
+    # shouldn't it be...
+    # nChannelLast = nChannelFirst + nMics
+    nChannelLast = nMics
+    fVec = Parameters['frequencyVector'].squeeze()
+
+    knownZ = [np.inf*np.ones(A_old.shape[2]),
+              z0 * np.ones(A_old.shape[2])]
+
+    calMx = np.zeros((nMics, 2, harmHi - harmLo + 1),
+                     dtype='complex')
+
+    #inputStruct = InfImp['Iteration'][-1,-1]['Input'][0,0]
+    inputStruct = InfImp
+    specInfImp = inputStruct['meanSpectrum'].squeeze()
+    specInfImp = specInfImp[harmLo:harmHi+1]
+    calMx[:,0,:] = np.transpose(specInfImp[:,:nMics])
+    #inputStruct = InfPipe['Iteration'][-1,-1]['Input'][0,0]
+    inputStruct = InfPipe
+    specInfPipe = inputStruct['meanSpectrum'].squeeze()
+    specInfPipe = specInfPipe[harmLo:harmHi+1]
+    calMx[:,1,:] = np.transpose(specInfPipe[:,:nMics])
+
+    # calculate pressure at ref plane for infinite impedance
+    # for the normal case where the microphone is some distance from the
+    # infinite impedance and the transfter matrix is needed
+    pressure = (specInfImp[:,0] / A_old[0,0,:])
+
+    for frequencyCounter in range(calMx.shape[2]):
+        # calculate the A_n1 terms
+        A[:,0,frequencyCounter] = (calMx[:,0,frequencyCounter]/
+                                   pressure[frequencyCounter])
+        # initialize fitting coefficients
+        coeff = []
+        const = []
+        newRowCoeff = np.zeros(nMics,dtype='complex')
+        newRowCoeff[0] = 1
+        coeff.append(newRowCoeff)
+        newRowConst = (A[0,0,frequencyCounter] *
+                       A[0,1,frequencyCounter] /
+                       A_old[0,0,frequencyCounter])
+        const.append(newRowConst)
+
+        loadNo = 1
+        for j in range(nMics):
+            for k in range(j):
+                newRowCoeff = np.zeros(nMics,dtype='complex')
+                newRowCoeff[k] = (z0 * calMx[j,loadNo,frequencyCounter] /
+                                  knownZ[loadNo][frequencyCounter])
+                newRowCoeff[j] = (-z0 * calMx[k,loadNo,frequencyCounter] /
+                                  knownZ[loadNo][frequencyCounter])
+                coeff.append(newRowCoeff)
+                newRowConst = (A[j,0,frequencyCounter] *
+                               calMx[k,loadNo,frequencyCounter] -
+                               A[k,0,frequencyCounter] *
+                               calMx[j,loadNo,frequencyCounter])
+                const.append(newRowConst)
+
+        # obtain the A_n2 terms by least_squares
+        A[:,1,frequencyCounter],_,_,_ = np.linalg.lstsq(np.array(coeff), 
+                                                  np.array(const))
+
+    return A
+
