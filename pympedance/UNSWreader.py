@@ -162,7 +162,7 @@ class ImpedanceMeasurement(object):
 
         self.buildFreqVect(freqLo, freqIncr)
 
-def lscov(a, b, w):
+def lscov(a, b, w, rcond=None):
     """
     calculates the weighted least squared solution to
       a.x = b
@@ -174,11 +174,25 @@ def lscov(a, b, w):
     t = np.linalg.cholesky(w)
     ta=np.linalg.solve(t,a)
     tb=np.linalg.solve(t,b)
-    return np.linalg.lstsq(ta,tb)
+    return np.linalg.lstsq(ta,tb,rcond=rcond)
 
 # TODO:
 # The result is slightly different when applying the analysis to
 # an already recorded file, especially at high-freq.
+
+def waveform_to_spectrum(waveform, num_points=None):
+    if num_points is None:
+        num_points = waveform.shape[0]
+    spectrum = np.fft.fft(waveform, n=num_points, axis=0, norm="ortho")
+    # only keep non-trivial points
+    harmHi = int(np.floor(num_points/2))
+    spectrum = spectrum[:harmHi+1]
+    # normalise
+    spectrum = spectrum * 2 / num_points
+    # fix DC
+    spectrum[0] = spectrum[0] / 2
+
+    return spectrum
 
 def build_mic_spectra(input_waves, 
                       excitation_signal=None,
@@ -219,9 +233,10 @@ def build_mic_spectra(input_waves,
     for chno in range(0,input_waves.shape[1]):
         chspec = []
         if method == 'fft':
-            for n in range(0,input_waves.shape[0]-nsamp,nsamp):
+            for n in range(0,input_waves.shape[0]-nsamp+1,nhop):
                 w = input_waves[n:n+nsamp,chno]
-                wspec = np.fft.fft(w*wind)
+                #wspec = np.fft.fft(w*wind)
+                wspec = waveform_to_spectrum(w*wind)
                 chspec.append(wspec[:int(nsamp/2+1)])
             all_spec.append(chspec)
         elif method == 'tf':
@@ -238,8 +253,11 @@ def build_mic_spectra(input_waves,
 
 
     inputdict['totalSpectrum'] = np.array(all_spec).transpose((2,1,0))
-    inputdict['meanSpectrum'] = np.mean(inputdict['totalSpectrum'], axis=1)
-    inputdict['spectralError'] = np.std(inputdict['totalSpectrum'], axis=1)
+    if discard_loops>0:
+        inputdict['totalSpectrum'] = inputdict['totalSpectrum'][:,discard_loops:-discard_loops,:]
+    inputdict['meanSpectrum'] = np.nanmean(inputdict['totalSpectrum'], axis=1)
+    inputdict['spectralError'] = np.nanstd(inputdict['totalSpectrum'], axis=1, ddof=1)
+    inputdict['numCycles'] = inputdict['totalSpectrum'].shape[1]*np.ones(input_waves.shape[1])
 
     return inputdict
 
@@ -295,26 +313,25 @@ def analyseinput(Input, Parameters,
         b = np.transpose(np.array([meanSpecRed]),
                          axes=[2,0,1])
     elif measType == 'Individual':
-        if countLoops:
-            # reorder the totalSpectrum vector to match meanSpectrum
-            if nMics == 1:
-                tempSpectrum =\
-                        totalSpectrum[harmLo:harmHi+1, countLoops-1:countLoops, 0];
-            elif nMics == 2:
-                tempSpectrum =\
-                    [totalSpectrum[harmLo:harmHi+1, countLoops-1:countLoops, 0],\
-                     totalSpectrum[harmLo:harmHi+1, countLoops-1:countLoops, 1]]
-            else:
-                tempSpectrum =\
-                    [totalSpectrum[harmLo: harmHi+1, countLoops-1:countLoops, 0],\
-                    totalSpectrum[harmLo: harmHi+1, countLoops-1:countLoops, 1],\
-                    totalSpectrum[harmLo: harmHi+1, countLoops-1:countLoops, 2]]
-      
+        # reorder the totalSpectrum vector to match meanSpectrum
+        if nMics == 1:
+            tempSpectrum =\
+                    totalSpectrum[harmLo:harmHi+1, countLoops:countLoops+1, 0];
+        elif nMics == 2:
+            tempSpectrum =\
+                [totalSpectrum[harmLo:harmHi+1, countLoops:countLoops+1, 0],\
+                 totalSpectrum[harmLo:harmHi+1, countLoops:countLoops+1, 1]]
+        else:
+            tempSpectrum =\
+                [totalSpectrum[harmLo: harmHi+1, countLoops:countLoops+1, 0],\
+                totalSpectrum[harmLo: harmHi+1, countLoops:countLoops+1, 1],\
+                totalSpectrum[harmLo: harmHi+1, countLoops:countLoops+1, 2]]
+
         b = np.transpose(tempSpectrum, axes=[0,2,1])
 
     # initialise p, u, deltap and deltau
-    p = np.zeros((A.shape[2],1),dtype='complex')
-    deltap = np.zeros((A.shape[2],1),dtype='complex')
+    p = np.zeros((A.shape[2],1), dtype='complex')
+    deltap = np.zeros((A.shape[2],1), dtype='complex')
     u = np.zeros_like(p)
     deltau = np.zeros_like(deltap)
     for freqCount in range(A.shape[2]): # length of frequency vector
@@ -324,16 +341,17 @@ def analyseinput(Input, Parameters,
         # if only two mics, calculate x using backslash operator
         # i.e. solve A*x = B for x
         if nMics == 1:
-            x,_,_,_ = lstsq(A[:,:,freqCount],b[:,:,freqCount])
+            x,_,_,_ = lstsq(A[:,:,freqCount], b[:,:,freqCount])
             # matrix is not square so use pseudoinverse
             Ainv = pinv(A[:,:,freqCount])
         elif nMics == 2:
-            x,_,_,_ = lstsq(A[:,:,freqCount],b[:,:,freqCount])
+            x,_,_,_ = lstsq(A[:,:,freqCount], b[:,:,freqCount])
             Ainv = np.linalg.inv(A[:,:,freqCount])
         else:
             # otherwise, use a weighted least-squares to determine x
             # weighted least squares solution to A*x = b with weighting covar
-            x,_,_,_ = lscov(A[:,:,freqCount], b[:,0,freqCount], covar)
+            x,_,_,_ = lscov(A[:,:,freqCount], b[:,0,freqCount], covar,
+                            rcond=rcond)
             Ainv = pinv(A[:,:,freqCount])
         # Use the inverse (or pseudoinverse) to calculate dx
         dx = np.sqrt(np.diag(np.dot(np.dot(Ainv, covar),
@@ -425,7 +443,7 @@ def recalc_calibration(InfPipe=None,
 
         # obtain the A_n2 terms by least_squares
         A[:,1,frequencyCounter],_,_,_ = np.linalg.lstsq(np.array(coeff), 
-                                                  np.array(const))
+                                                  np.array(const),rcond=-1)
 
     return A
 
@@ -442,51 +460,38 @@ def resample_calibration(Parameters,
     new measurements will be based on Parameters['numPoints']/resamp
     points
     """ 
-    old_npoints = np.asscalar(Parameters['numPoints'])
-    sr = float(np.asscalar(Parameters['samplingFreq']))
-    old_f = np.linspace(0,sr/2,int(old_npoints/2)+1)
-    old_harmLo = np.asscalar(Parameters['harmLo'])
-    old_harmHi = np.asscalar(Parameters['harmHi'])
-    old_freqLo = np.asscalar(Parameters['freqLo'])
-    old_freqHi = np.asscalar(Parameters['freqHi'])
-    old_freqIncr = np.asscalar(Parameters['freqIncr'])
+    ParametersNew = deepcopy(Parameters)
+    numPoints = np.asscalar(Parameters['numPoints'])
+    harmLo = np.asscalar(Parameters['harmLo'])
+    harmHi = np.asscalar(Parameters['harmHi'])
 
-    npts_new = int(old_npoints/resamp)
-    nf_new = int(npts_new/2+1)
-    new_ind = np.arange(0,len(old_f),resamp)
-    new_f = old_f[new_ind]
+    old_to_new_bins = np.arange(0,numPoints+1,resamp)
+    fvec_mask = np.logical_and(old_to_new_bins >= harmLo-1,
+                               old_to_new_bins <= harmHi-1)
 
-    freqLo = new_f[np.flatnonzero(new_f >= Parameters['freqLo'][0,0])[0]]
-    freqHi = new_f[np.flatnonzero(new_f >= Parameters['freqHi'][0,0])[0]]
-    freqIncr = Parameters['freqIncr'][0,0]*resamp
-    freqVec = np.arange(freqLo,freqHi,freqIncr)
+    old_to_new_fidx = old_to_new_bins[fvec_mask] - harmLo + 1
+    #pdb.set_trace()
+    ParametersNew['numPoints'] = int(numPoints / resamp) 
+    ParametersNew['A'] = Parameters['A'][:,:,old_to_new_fidx]
+    ParametersNew['A_old'] = Parameters['A_old'][:,:,old_to_new_fidx]
+    ParametersNew['calibrationMatrix'] = Parameters['calibrationMatrix'][:,:,old_to_new_fidx]
+    ParametersNew['pressure'] = Parameters['pressure'][old_to_new_fidx]
+    ParametersNew['frequencyVector'] = Parameters['frequencyVector'][old_to_new_fidx]
+    ParametersNew['k'] = Parameters['k'][old_to_new_fidx]
+    ParametersNew['harmLo'] = np.flatnonzero(old_to_new_bins >=
+                                             harmLo-1)[0]
+    ParametersNew['harmHi'] = np.flatnonzero(old_to_new_bins <=
+                                             harmHi-1)[-1]
 
-    eps = freqIncr/10
-    old_freqVec = Parameters['frequencyVector']
+    ParametersNew['freqLo'] = ParametersNew['frequencyVector'][0]
+    ParametersNew['freqHi'] = ParametersNew['frequencyVector'][-1]
 
-    keep_ind = []
-    for f in freqVec:
-        this_ind = np.flatnonzero(np.abs(old_freqVec-f)<eps)
-        if len(this_ind)>0:
-            keep_ind.append(this_ind[0])
-    keep_ind = np.array(keep_ind)
-    #harmLo = np.flatnonzero(new_f>=Parameters[0,0])[0]
-    #harmHi = np.flatnonzero(new_f>=Parameters[0,0])[0]
-    harmLo = np.flatnonzero(new_f>=Parameters['freqLo'][0,0])[0]
-    harmHi = harmLo+len(keep_ind)-1
-    A = Parameters['A']
 
-    freqVec = new_f[harmLo:harmHi+1]
+    ParametersNew['Output'][0,0]['spectrum'] = \
+        Parameters['Output'][0,0]['spectrum'][::resamp]
 
-    NewParam = deepcopy(Parameters)
-
-    NewParam['numPoints'] = npts_new
-    NewParam['harmLo'] = harmLo
-    NewParam['harmHi'] = harmHi
-    NewParam['freqLo'] = freqLo
-    NewParam['freqHi'] = freqHi
-    NewParam['freqIncr'] = freqIncr
-    NewParam['frequencyVector'] = freqVec
+    #ParametersNew['Output'][0,0]['waveform'] = spectrumToWaveform(
+    #    Parameters['Output'][0,0]['spectrum'], numPoints)
 
     if InfPipe is not None and InfImp is not None:
         input_waves = np.array([InfPipe['Input'][0,0]['originalWaveform'],
@@ -496,6 +501,6 @@ def resample_calibration(Parameters,
         A = recalc_calibration(InfPipe=Input_mod[0],
                                InfImp =Input_mod[1],
                                Parameters=Parameters)
-    NewParam['A'] = A[:,:,keep_ind]
-    return NewParam
+        ParametersNew['A'] = A
+    return ParametersNew, old_to_new_fidx 
 
