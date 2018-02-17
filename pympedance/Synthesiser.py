@@ -526,6 +526,7 @@ class TerminationImpedance(DuctSection):
     default is an open termination"""
     def __init__(self):
         self.__call__ = np.vectorize(self._get_impedance_at_freq)
+        super(TerminationImpedance,self).__init__()
 
     def __call__(self, freq):
         """
@@ -578,6 +579,47 @@ class PerfectOpenEnd(TerminationImpedance):
     at any given frequency
     """
     pass
+
+class FlangedPiston(TerminationImpedance):
+    def __init__(self, radius=0.1):
+        self.radius = radius
+        super(FlangedPiston,self).__init__()
+
+    def _get_impedance_at_freq(self,f):
+        c = self.get_speed_of_sound()
+        K = 2*np.pi*f/c 
+        ka = K * self.radius
+        # not sure that Z0 should be the parent one...
+        Z0 = self.get_characteristic_impedance()
+
+        # alternative approximation from Dalmont et al. (2001)
+        # define the end correction for the low frequency limit
+        d_simple = 0.8216 * self.radius
+
+        # determine the frequency-dependent end correction (15a)
+        d_simple = d_simple / (1 + (0.77 * ka)**2 / 
+                                   (1 + 0.77 * ka))
+
+        # determine the modulus of the reflection coefficient (15b)
+        modR = ((1 + (0.323 * ka) - (0.077 * ka**2)) /
+                (1 + (0.323 * ka) + ((1 - 0.077) * ka**2)))
+        # quick fix for negative modR
+        try:
+            modR[modR<0]=0
+        except TypeError:
+            if modR<0:
+                modR=0
+
+        # calculate the imaginary part of the end correction
+        # since R = -e^(-2kjd(complex)) = -modR*e^(-2kjd(real))
+        # so, d(complex) = d*ln(modR))
+        di = np.log(modR) / (2 * K);
+        d = d_simple + 1j*di;
+
+        # calculate the impedance (9)
+        Z_flange = 1j * Z0 * np.tan(K * d); # Flanged opening
+        
+        return Z_flange
 
 
 class PerfectClosedEnd(TerminationImpedance):
@@ -738,6 +780,7 @@ class Duct(PortImpedance):
 
     def set_termination(self, term):
         assert isinstance(term, TerminationImpedance)
+        term.set_parent(self)
         self.termination = term
 
     def get_input_reflection_function_at_freq(self, f):

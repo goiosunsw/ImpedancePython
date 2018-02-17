@@ -2,8 +2,8 @@ import unittest
 import numpy as np
 import sys
 
-from ImpedanceSynthesiser import *
-from Impedance import Impedance
+from pympedance.Synthesiser import *
+from pympedance import Impedance
 
 def freq_vector(f_st = 100, f_end = 10000, n = 50, log=False):
     if log:
@@ -446,6 +446,14 @@ class VectorTests(unittest.TestCase):
             self.assertEqual(len(z),len(f))
             for (ff,zz) in zip(f,z):
                 self.assertEqual(zz,tt._get_impedance_at_freq(ff))
+
+    def test_flanged_piston(self):
+        f = np.array([10,100,1000])
+        tt = FlangedPiston()
+        z = tt._get_impedance_at_freq(f)
+        self.assertEqual(len(z),len(f))
+        for (ff,zz) in zip(f,z):
+            self.assertEqual(zz,tt._get_impedance_at_freq(ff))
 
 
 def main():

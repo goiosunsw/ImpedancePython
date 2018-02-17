@@ -15,6 +15,7 @@ import sys
 import os
 import numpy as np
 from scipy.io import matlab
+import scipy.signal as sig
 from ._impedance import Impedance
 from copy import copy, deepcopy
 
@@ -220,7 +221,7 @@ def build_mic_spectra(input_waves,
     inputdict = dict()
     nsamp = nwind
     if window is not None:
-        wind = get_window(window, nsamp)
+        wind = sig.get_window(window, nsamp)
     else:
         wind = np.ones(nsamp)
 
