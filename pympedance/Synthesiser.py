@@ -316,13 +316,14 @@ class StraightDuct(DuctSection):
     """ 
     Straight section of a duct
     """
-    def __init__(self, length=0.5, radius=0.1):
+    def __init__(self, length=0.5, radius=0.1, loss_multiplier=None):
         """ 
         create a straight section
 
         parameters:
             * length (m)
             * radius (m)
+            * loss_multiplier: increases viscothermal losses by factor
         """
         super(StraightDuct, self).__init__()
         self.radius = radius
@@ -330,6 +331,7 @@ class StraightDuct(DuctSection):
 
         self._recalc()
         self.gamma = 1.4
+        self.loss_multiplier = loss_multiplier
 
     def _reset_impedance(self):
         """
@@ -408,11 +410,14 @@ class StraightDuct(DuctSection):
                 (PQ*(1.-PQ/(2*(self.gamma-1.)))+1j*(1.+PQ))
 
         # propagation constant
-        G = np.sqrt(Zv*Yt)
-        # characteristic impedance
-        # Zeta    = np.sqrt(Zv/Yt)/s
 
-        return ((G)/1j)
+        G = np.sqrt(Zv*Yt)
+        if self.loss_multiplier is None:
+            # characteristic impedance
+            # Zeta    = np.sqrt(Zv/Yt)/s
+            return ((G)/1j)
+        else:
+            return np.imag(G)-1j*np.real(G)*self.loss_multiplier 
 
     def get_input_radius(self):
         """
