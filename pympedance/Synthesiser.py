@@ -172,10 +172,44 @@ class DuctSection(object):
         (0-length cylinder)
         """
         self.length = 0.0
+        self.radius = 1.0
         self.char_impedance = 1.
         self.normalized_impedance = 1.0
         self.impedance_multiplier = 1.0
         self.parent = None
+
+    def get_input_radius(self):
+        """
+        return the input radius of the duct
+        (same as DuctSection.get_radius_at_position(0.0))
+        """
+        return self.radius
+
+    def get_output_radius(self):
+        """
+        return the output radius of the duct
+        (same as DuctSection.get_radius_at_position(
+            DuctSection.get_length()))
+        """
+        return self.radius
+
+    def _reset_impedance(self):
+        """
+        recalculate the characteristic impedance of the 
+        straight duct based on the geometrical dimentions:
+
+            Zc = rho * c / S
+            S = pi * r^2
+        """
+        self.cross_section = np.pi*self.get_input_radius()**2
+        self.char_impedance = self.get_characteristic_impedance()
+        if self.parent:
+            self.normalized_impedance =\
+                self.char_impedance/self.parent.get_characteristic_impedance()
+        else:
+            self.normalized_impedance = 1.0
+        self.impedance_multiplier = self.char_impedance /\
+            self.normalized_impedance
 
     def get_length(self):
         """
@@ -233,10 +267,11 @@ class DuctSection(object):
 #
     def get_characteristic_impedance(self):
         """
-        returns the characteristic impedance of this duct section
-        (kg.m-4.s-1)
+        return the characteristic impedance of the duct section
         """
-        return self.char_impedance
+        return self.get_medium_density() *\
+            self.get_speed_of_sound() /\
+            self.cross_section
 
     def travelling_mx_at_freq(self, freq=0.0, position=0):
         """ 
@@ -262,7 +297,7 @@ class DuctSection(object):
         """ 
         recalculates internal variables in this section
         """
-        pass
+        self._reset_impedance()
 
     def get_speed_of_sound(self):
         """ 
@@ -333,24 +368,6 @@ class StraightDuct(DuctSection):
         self.gamma = 1.4
         self.loss_multiplier = loss_multiplier
 
-    def _reset_impedance(self):
-        """
-        recalculate the characteristic impedance of the 
-        straight duct based on the geometrical dimentions:
-
-            Zc = rho * c / S
-            S = pi * r^2
-        """
-        self.cross_section = np.pi*self.get_input_radius()**2
-        self.char_impedance = self.get_characteristic_impedance()
-        if self.parent:
-            self.normalized_impedance =\
-                self.char_impedance/self.parent.get_characteristic_impedance()
-        else:
-            self.normalized_impedance = 1.0
-        self.impedance_multiplier = self.char_impedance /\
-            self.normalized_impedance
-
     def _recalc(self):
         """
         recalculate internal variables:
@@ -418,21 +435,6 @@ class StraightDuct(DuctSection):
             return ((G)/1j)
         else:
             return np.imag(G)-1j*np.real(G)*self.loss_multiplier 
-
-    def get_input_radius(self):
-        """
-        return the input radius of the duct
-        (same as DuctSection.get_radius_at_position(0.0))
-        """
-        return self.radius
-
-    def get_output_radius(self):
-        """
-        return the output radius of the duct
-        (same as DuctSection.get_radius_at_position(
-            DuctSection.get_length()))
-        """
-        return self.radius
 
     def travelling_mx_at_freq(self, freq=0.0):
         """
@@ -517,14 +519,6 @@ class StraightDuct(DuctSection):
                          [1j/self.normalized_impedance*np.sin(phase),
                           np.cos(phase)]])
 
-    def get_characteristic_impedance(self):
-        """
-        return the characteristic impedance of the duct section
-        """
-        return self.get_medium_density() *\
-            self.get_speed_of_sound() /\
-            self.cross_section
-
 
 class TerminationImpedance(DuctSection):
     """Base class for a termination impedance
@@ -587,15 +581,16 @@ class PerfectOpenEnd(TerminationImpedance):
 
 class FlangedPiston(TerminationImpedance):
     def __init__(self, radius=0.1):
-        self.radius = radius
         super(FlangedPiston,self).__init__()
+        self.radius=radius
+        self._reset_impedance()
 
     def _get_impedance_at_freq(self,f):
         c = self.get_speed_of_sound()
         K = 2*np.pi*f/c 
         ka = K * self.radius
         # not sure that Z0 should be the parent one...
-        Z0 = self.get_characteristic_impedance()
+        Z0 = self.normalized_impedance
 
         # alternative approximation from Dalmont et al. (2001)
         # define the end correction for the low frequency limit
