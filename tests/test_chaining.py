@@ -147,6 +147,17 @@ class ChainingTests(unittest.TestCase):
             r = mid1._chain_reflection_coeff_at_freq(r, f)
             self.assertAlmostEqual(np.abs(r),1.,places=1)
 
+class StraightDuctTests(unittest.TestCase):
+
+    def test_loss_multiplier(self):
+        freq=100.
+        sdl = StraightDuct(loss_multiplier=5.)
+        sdn = StraightDuct()
+        pl = sdl.get_propagation_coefficient(freq)
+        pn = sdn.get_propagation_coefficient(freq)
+        self.assertNotEqual(np.imag(pl),np.imag(pn))
+        self.assertAlmostEqual(np.real(pl),np.real(pn))
+
 class DuctTests(unittest.TestCase):
 
     def test_rf_default_section_plus_termination(self):
