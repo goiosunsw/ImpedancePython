@@ -525,6 +525,8 @@ class TerminationImpedance(DuctSection):
     default is an open termination"""
     def __init__(self):
         self.__call__ = np.vectorize(self._get_impedance_at_freq)
+        self.radius = 1.0
+        self.char_impedance = 1.0
         super(TerminationImpedance,self).__init__()
 
     def __call__(self, freq):
