@@ -10,6 +10,7 @@ import sys
 import matplotlib.pyplot as pl
 from ._impedance import Impedance as imp
 from copy import copy
+from scipy.special import struve, j1
 
 phys_params = {'speed_of_sound': 343.2,
                'medium_density': 1.2}
@@ -570,6 +571,18 @@ class TerminationImpedance(DuctSection):
         ax[1].plot(fvec, np.angle(zvec))
         return fig, ax
 
+    def far_field_transpedance(self, f):
+        """
+        Returns the farfield pressure*distance for a unit volume flow
+        at the radiation plane
+        
+        to get the pressure at a particular point at r meters from duct
+        output:
+            p = FlangedPiston.far_field_transpedance() * flow / distance
+                * exp(1j*k*distance)
+        """
+        return 1j/2*f*self.get_medium_density()
+
 
 class PerfectOpenEnd(TerminationImpedance):
     """
@@ -586,42 +599,37 @@ class FlangedPiston(TerminationImpedance):
         super(FlangedPiston,self).__init__()
         self.radius=radius
         self._reset_impedance()
+        self.approx=False
 
-    def _get_impedance_at_freq(self,f):
+    def _get_impedance_at_freq(self, f):
         c = self.get_speed_of_sound()
         K = 2*np.pi*f/c 
         ka = K * self.radius
         # not sure that Z0 should be the parent one...
         Z0 = self.normalized_impedance
 
-        # alternative approximation from Dalmont et al. (2001)
-        # define the end correction for the low frequency limit
-        d_simple = 0.8216 * self.radius
+        if self.approx:
+            zfletch = (((ka)**2/2)**-1+1)**-1 + \
+                       1j*((8*ka/3/np.pi)**-1 + (2/np.pi/ka)**-1)**-1
+        else:
+            zfletch = 1-j1(2*ka)/ka + 1j*struve(1,2*ka)/ka
 
-        # determine the frequency-dependent end correction (15a)
-        d_simple = d_simple / (1 + (0.77 * ka)**2 / 
-                                   (1 + 0.77 * ka))
 
-        # determine the modulus of the reflection coefficient (15b)
-        modR = ((1 + (0.323 * ka) - (0.077 * ka**2)) /
-                (1 + (0.323 * ka) + ((1 - 0.077) * ka**2)))
-        # quick fix for negative modR
-        try:
-            modR[modR<0]=0
-        except TypeError:
-            if modR<0:
-                modR=0
-
-        # calculate the imaginary part of the end correction
-        # since R = -e^(-2kjd(complex)) = -modR*e^(-2kjd(real))
-        # so, d(complex) = d*ln(modR))
-        di = np.log(modR) / (2 * K);
-        d = d_simple + 1j*di;
-
-        # calculate the impedance (9)
-        Z_flange = 1j * Z0 * np.tan(K * d); # Flanged opening
+        Z_flange = Z0*zfletch
         
         return Z_flange
+
+    def far_field_transpedance(self, f):
+        """
+        Returns the farfield pressure*distance for a unit volume flow
+        at the radiation plane
+        
+        to get the pressure at a particular point at r meters from duct
+        output:
+            p = FlangedPiston.far_field_transpedance() * flow / distance
+                * exp(1j*k*distance)
+        """
+        return 1j/2*f*self.get_medium_density()
 
 
 class PerfectClosedEnd(TerminationImpedance):
@@ -953,7 +961,8 @@ class Duct(PortImpedance):
         """
         mx = self.normalized_transfer_mx_at_freq(freq=freq,
                                                  from_pos=from_pos,
-                                                 to_pos=to_pos)
+                                                 to_pos=to_pos,
+                                                 reverse=reverse)
 
         # remove normalization of the impedance
         mx[0, 1] *= self.char_impedance
