@@ -1051,6 +1051,24 @@ class Duct(PortImpedance):
               (cmx1[0,0]*z0 + cmx1[0,1]*one)
         return tfp
 
+    def radiation_transpedance(vt,f=[1]):
+        """
+        Return radio of:
+            * radiated pressure divided by
+            * input flow
+        """
+        #zl = vt.termination._get_impedance_at_freq(f)
+        zi = self.get_input_impedance_at_freq(f)
+        tm = self.transfer_mx_at_freq(f,reverse=False)
+        transp = np.zeros(len(f),dtype='complex')
+        for ii, ff in enumerate(f):
+            #aout = (np.dot(np.linalg.inv(tm[:,:,ii]),np.array([zl[ii],1])))
+            #transp[ii]=(aout[0])
+            aout = np.dot(tm[:,:,ii],np.array([zi[ii],1]))
+            #aout = np.dot(tm[:,:,ii],np.array([0,1]))
+            transp[ii] = aout[1] * vt.termination.far_field_transpedance(ff)
+        return transp
+
     def plot_geometry(self, ax=None):
         """
         plot a transverse section of the duct
