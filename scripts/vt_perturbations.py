@@ -21,6 +21,8 @@ import pympedance as pym
 TYP_TO_FUN_DICT = {'notch': _pert_notch,
                    'const_vol': _pert_const_vol}
 
+__parallel = True
+
 def profile_to_duct(l=None, rad=None,
                     nsegments=None,
                     reverse=False, 
@@ -160,7 +162,6 @@ def perturbation_analyser(vt, types='all', fracs=[0.1], scale_power=1):
             results = pool.starmap(all_impedance_calculator, arg_iter)
     else:
         results = starmap(all_impedance_calculator, arg_iter)
- 
 
 def main(arguments):
     parser = argparse.ArgumentParser(
@@ -174,7 +175,7 @@ def main(arguments):
 
     vt = vocal_tract_reader(infile)
     
-    perturbation_analyser(tract=tract, types='all', outputs='all'):
+    perturbation_analyser(tract=tract, types='all', outputs='all')
 
 
 if __name__ == "__main__":
