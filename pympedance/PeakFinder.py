@@ -122,7 +122,71 @@ class PeakFinder(object):
         self.val = x[self.pos]
         self.keep = np.ones(len(self.pos)).astype('bool')
         
+    def get_q(self, pos=None, val=None):
+        x = self.x
+        if len(self.pos) == 0:
+            self.findpos()
+        if len(self.fpos) == 0:
+            self.refine_all()
         
+        pos = self.get_pos()
+        isrt = np.argsort(pos)
+        fpos = pos[isrt]
+        fval = self.get_val()[isrt]
+
+        last_i = 0
+
+        q = np.zeros(len(fpos))
+
+        for ii , (p, v) in enumerate(zip(fpos, fval)):
+            # left-hand slope
+            imin = last_i
+            imax = int(np.floor(p))
+            half_val = v/2
+            ihalf_from_min = np.flatnonzero(self.x[imin:imax] < half_val)
+            if len(ihalf_from_min) > 0:
+                ihalf = ihalf_from_min[-1]+imin
+                ihalf_f = ((self.x[ihalf]-half_val) / 
+                           (self.x[ihalf]-self.x[ihalf+1]) +
+                           ihalf)
+                l_hpos = ihalf_f
+            else:
+                l_hpos = None
+
+            # right-hand slope
+            imin = int(np.ceil(p))
+            last_i=imin
+            try:
+                imax = int(np.floor(self.fpos[ii+1]))
+            except IndexError:
+                imax = len(self.x)
+
+            ihalf_from_min = np.flatnonzero(self.x[imin:imax] < half_val)
+            if len(ihalf_from_min) > 0:
+                ihalf = ihalf_from_min[0]+imin
+                ihalf_f = ((self.x[ihalf-1]-half_val) / 
+                           (self.x[ihalf-1]-self.x[ihalf]) +
+                           ihalf)
+                r_hpos = ihalf_f
+            else:
+                r_hpos = None
+
+            if l_hpos is not None:
+                if r_hpos is not None:
+                    fwhmax = r_hpos-l_hpos
+                else:
+                    fwhmax = (p-l_hpos)*2
+            else:
+                if r_hpos is not None:
+                    fwhmax = (r_hpos - p)*2
+                else:
+                    fwhmax = np.nan
+            q[ii] = p/fwhmax
+        
+        return q
+
+
+
     def plot(self, logarithmic=False):
         """Plot a graphical representation of the peaks
         
