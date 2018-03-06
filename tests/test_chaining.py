@@ -2,8 +2,8 @@ import unittest
 import numpy as np
 import sys
 
-from ImpedanceSynthesiser import *
-from Impedance import Impedance
+from pympedance.Synthesiser import *
+from pympedance import Impedance
 
 def freq_vector(f_st = 100, f_end = 10000, n = 50, log=False):
     if log:
@@ -146,6 +146,17 @@ class ChainingTests(unittest.TestCase):
             r = term._get_reflection_coeff_at_freq(f)
             r = mid1._chain_reflection_coeff_at_freq(r, f)
             self.assertAlmostEqual(np.abs(r),1.,places=1)
+
+class StraightDuctTests(unittest.TestCase):
+
+    def test_loss_multiplier(self):
+        freq=100.
+        sdl = StraightDuct(loss_multiplier=5.)
+        sdn = StraightDuct()
+        pl = sdl.get_propagation_coefficient(freq)
+        pn = sdn.get_propagation_coefficient(freq)
+        self.assertNotEqual(np.imag(pl),np.imag(pn))
+        self.assertAlmostEqual(np.real(pl),np.real(pn))
 
 class DuctTests(unittest.TestCase):
 
@@ -446,6 +457,14 @@ class VectorTests(unittest.TestCase):
             self.assertEqual(len(z),len(f))
             for (ff,zz) in zip(f,z):
                 self.assertEqual(zz,tt._get_impedance_at_freq(ff))
+
+    def test_flanged_piston(self):
+        f = np.array([10,100,1000])
+        tt = FlangedPiston()
+        z = tt._get_impedance_at_freq(f)
+        self.assertEqual(len(z),len(f))
+        for (ff,zz) in zip(f,z):
+            self.assertEqual(zz,tt._get_impedance_at_freq(ff))
 
 
 def main():
