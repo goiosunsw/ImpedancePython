@@ -14,7 +14,7 @@
 import pylab as pl
 import numpy as np
 import string
-from . import PeakFinder as pf
+from . import PeakFinder as pk
 import os
 
 
@@ -122,26 +122,25 @@ class Impedance(object):
         return newimp.getImpedance()
         
     def getImpedance(self):
-        return self.z.squeeze()
+        return self.imped.squeeze()
 
     def getFrequencyVect(self):
-        return self.f
+        return self.freq
 
         
     def findPeaks(self):
         '''Finds the frequencies and values of impedance maxima
         '''
-        import PeakFinder as pk
         
-        f = self.f
-        pf=pk.PeakFinder(abs(self.z))
+        f = self.freq
+        pf=pk.PeakFinder(abs(self.imped))
         pf.refine_all(rad=3,logarithmic=True)
         pf.filter_by_salience(rad=5)
     
         fpk = np.interp(pf.get_pos(),np.arange(len(f)),f)
-        zpk = np.interp(pf.get_pos(),np.arange(len(f)),abs(self.z.squeeze()))
+        zpk = np.interp(pf.get_pos(),np.arange(len(f)),abs(self.imped.squeeze()))
 
-        return fpk,zpk
+        return fpk,zpk, pf.get_q()
 
     def findZeroPh(self, direction=-1):
         '''Finds the frequencies at which the phase is 0
@@ -177,7 +176,50 @@ class Impedance(object):
 
         return fpk,zpk
  
-    
+    def estimate_modal_expansion(self, **kwargs):
+        """
+        Perform the estimation of a modal expansion of the loaded data.
+        
+        (part of Moreesc by F. Silva:
+            http://moreesc.lma.cnrs-mrs.fr/)
+
+        Parameters
+        ==========
+        algorithm : str 'Kennelly' or 'bruteforce'
+            Algorithm used to compute the modal expansion.
+        kwargs : passed to computational routines.
+        """
+        kwargs['output_snCn'] = True
+        method = kwargs.pop('algorithm', 'Kennelly')
+        from . import ModalExpansionEstimation as mod
+
+        freq, valZ = self.frequencies, self.values
+        fmin = kwargs.pop('fmin', self.frequencies[0])
+        fmax = kwargs.pop('fmax', self.frequencies[-1])
+        mask_opt = np.logical_and(freq > fmin, freq < fmax)
+        freq, valZ = freq[mask_opt], valZ[mask_opt]
+
+        if method.lower() == 'kennelly':
+            tmp = mod.multiple_circles(freq, valZ, **kwargs)
+            print("Kennelly fitting is over, please check the result!")
+            self.poles, self.residues = tmp
+        elif method.lower() == 'bruteforce':
+            flag, tmp = mod.bruteforce_optimization(freq, valZ, **kwargs)
+            if flag:
+                print('Modal expansion estimation seems successful.')
+                self.poles, self.residues = tmp
+            else:
+                print('Modal expansion estimation not successful...')
+                self.poles, self.residues = np.array([]), np.array([])
+        else:
+            raise NotImplementedError('Algorithm %s does not exist.' % method)
+
+        # Remove active modes
+        idx = (self.poles.real <= 0.)
+        self.poles = self.poles[idx]
+        self.residues = self.residues[idx]
+        self.nbmodes = len(self.poles)
+
     def plotAbsAngle(self,fig=None):
         if fig is None:
             fig=pl.figure()
