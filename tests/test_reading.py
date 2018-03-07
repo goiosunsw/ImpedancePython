@@ -4,7 +4,7 @@ import numpy as np
 import sys
 import os
 
-from ImpedanceUNSW import *
+from pympedance.UNSWreader import *
 
 
 script_path, _ = os.path.split(os.path.realpath(__file__))

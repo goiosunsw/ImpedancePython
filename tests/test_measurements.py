@@ -2,9 +2,9 @@ import unittest
 import numpy as np
 import sys
 
-from ImpedanceSynthesiser import *
-from ImpedanceMeasurement import *
-from Impedance import Impedance
+from pympedance.Synthesiser import *
+from pympedance.Measurement import *
+from pympedance import Impedance
 
 
 

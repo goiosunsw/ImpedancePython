@@ -99,8 +99,14 @@ def transfer_to_travelling_mx(transfer, char_impedance=1.0):
     # transfer_to_travelling conversion matrix
     ttm = transfer_to_travelling_conversion_mx()
     ttmi = np.linalg.inv(ttm)
-    trav = np.dot(transfer, ttmi)
-    trav = np.dot(ttm, trav)
+    if transfer.ndim == 2:
+        trav = np.dot(transfer, ttmi)
+        trav = np.dot(ttm, trav)
+    else:
+        trav = np.zeros(transfer.shape, dtype='complex')
+        for ii in range(transfer.shape[2]):
+            trav[:,:,ii] = np.dot(transfer[:,:,ii], ttmi)
+            trav[:,:,ii] = np.dot(ttm, trav[:,:,ii])
     return trav
 
 
@@ -175,6 +181,7 @@ class DuctSection(object):
         self.length = 0.0
         self.radius = 1.0
         self.char_impedance = 1.
+        self.cross_section = 1.
         self.normalized_impedance = 1.0
         self.impedance_multiplier = 1.0
         self.parent = None
@@ -291,8 +298,10 @@ class DuctSection(object):
         at a given frequency value:
            relates [P, Zc U] at each end
         """
-
-        return np.array([[1, 0], [0, 1]])
+        
+        vec1 = freq**0
+        vec0 = freq*0
+        return np.array([[vec1, vec0], [vec0, vec1]])
 
     def _recalc(self):
         """ 
@@ -733,6 +742,7 @@ class Duct(PortImpedance):
         self.termination = PerfectOpenEnd()
         self.world = world
         self.losses = losses
+        self.char_impedance = 1.0
 
     def set_acoustic_world(self, world):
         self.speed_of_sound = world.speed_of_sound
@@ -747,9 +757,18 @@ class Duct(PortImpedance):
         if len(self.elements) == 0:
             self.char_impedance =\
                 element.get_characteristic_impedance()
+            self.reset_element_char_impedances()
         element.set_parent(self)
         self.elements.append(element)
         self.update_element_pos()
+
+    def reset_element_char_impedances(self):
+        try:
+            self.termination._reset_impedance()
+        except AttributeError:
+            pass
+        for el in self.elements:
+            el._reset_impedance()
     
     def copy(self):
         new_duct = copy(self)
@@ -924,6 +943,11 @@ class Duct(PortImpedance):
                 [p, Zc u]_from = [m11,m12; m21, m22] [p, Zc u]_to
         """
         
+        try:
+            freq.__iter__
+        except AttributeError:
+            freq = np.array([freq])
+
         mx = np.tile(np.identity(2),(len(freq),1,1)).swapaxes(0,2)
 
         for el_nbr, el, el_st_pos, el_end_pos in \
