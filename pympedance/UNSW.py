@@ -40,28 +40,36 @@ def read_UNSW_impedance(filename=None, paramfile=None,
     return imp_obj
 
 class MeasurementParameters(object):
-    def __init__(radius=0.0075,
-                 mic_spacing=None,
-                 attenuation_factor=1,
-                 driver='',
-                 wool=True,
-                 sampling_frequency=44100.,
-                 bit_depth=16,
-                 num_points=1024,
-                 desired_freq_lo=0.,
-                 desired_freq_hi=None,
-                 n_loops=1,
-                 n_channel_first=1,
-                 n_channel_last=3,
-                 temperature=25,
-                 humidity=0.6,
-                 gain=0.00316,
-                 computer='win',
-                 device_type='asio',
-                 device_number=0.,
-                 calibration_files=None):
-        pass
-                 
+    def __init__(self, from_mat=None):
+        """
+        Initialise parameters
+
+        If a matlab structure is given in from_mat,
+        it will be copied to the object
+
+        from_mat should be read with scipy.io.loadmat(squeeze_me=False)
+        """
+        if from_mat is not None:
+            self.load_mat_params(from_mat)
+    
+    def load_mat_params(self, Parameters):
+        """
+        read parameters from matlab structure Parameters
+        obtained by reading a .mat file with
+
+        mdata = scipy.io.loadmat(matfile, squeeze_me=False,
+                                 variable_names='Parameters')
+        
+        # and then select 
+        
+        Parameters = mdata['Parameters'][0,0]
+        """
+        #self.radius = np.asscalar(Parameters['radius'])
+        for k in Parameters.dtype.names:
+            try:
+                self.__setattr__(k, np.asscalar(Parameters[k]))
+            except ValueError:
+                self.__setattr__(k, Parameters[k])
 
 
 class ImpedanceIteration(object):
