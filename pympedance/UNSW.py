@@ -19,6 +19,7 @@ from scipy.io import matlab
 import scipy.signal as sig
 from ._impedance import Impedance
 from copy import copy, deepcopy
+import logging
 
 from scipy.linalg import pinv, lstsq
 
@@ -39,8 +40,40 @@ def read_UNSW_impedance(filename=None, paramfile=None,
 
     return imp_obj
 
+def mat_parameter_from_file(matfile):
+    """
+    try to extract parameters from mat file
+    """
+    mdata = matlab.loadmat(matfile)
+    parameters = None
+
+    try:
+        parameters = mdata['Parameters'][0,0]
+    except KeyError:
+        parameters = mdata
+    try:
+        parameters['harmLo']
+        parameters['numPoints']
+    except KeyError:
+        raise
+        return None
+
+#    partup = namedtuple('parameters', parameters.dtype.names)
+#    pp = partup
+#    for k in parameters.dtype.names:
+#        par = parameters[k]
+#        if np.prod(par.shape) <= 1 or par.dtype[0] == 'U':
+#            pp[k] = np.asscalar(par)
+#        else:
+#            pp[k] = par
+
+    return parameters
+
+
 class MeasurementParameters(object):
-    def __init__(self, from_mat=None):
+    def __init__(self, from_mat=None, num_points=1024, 
+                 harm_lo=0, harm_hi=-1, window=None,
+                 method='fft', nhop=None):
         """
         Initialise parameters
 
@@ -49,27 +82,182 @@ class MeasurementParameters(object):
 
         from_mat should be read with scipy.io.loadmat(squeeze_me=False)
         """
+        self.can_recalculate = True
+
         if from_mat is not None:
             self.load_mat_params(from_mat)
+        else:
+            self.num_points = num_points
+            self.harm_lo = harm_lo
+            self.harm_hi = harm_hi
+
+        if window is None:
+            self.window = 'rect'
+        else:
+            self.window = window
+
+        if nhop is None:
+            self.hop = self.num_points
+        else:
+            self.hop = nhop
+
+        self.spec_method = method
+
+    def calc_calibration_marix(self,
+                               infinite_imp_file,
+                               infinite_pipe_file,
+                               infinite_flange=None):
+        """
+        Calculate an impedance matrix from raw calibration signals
+        . uses the parameters in this structure
+
+        Returns a calibration matrix A:
+            [n_channels X 2 X n_freq_bins]
+        """
+
+        inf_imp_obj = ImpedanceMeasurement(filename=infinite_imp_file)
+        inf_pipe_obj = ImpedanceMeasurement(filename=infinite_pipe_file)
+
+        A_old = self.A
+        A = copy(A_old)
+        z0 = self.z0
+        harmLo = self.harm_lo
+        harmHi = self.harm_hi
+        nChannelFirst = self.n_channel_first
+        micSpacing = self.mic_pos
+        nMics = len(micSpacing)
+        # shouldn't it be...
+        # nChannelLast = nChannelFirst + nMics
+        nChannelLast = nMics
+        fVec = self.frequency_vector
+
+        knownZ = [np.inf*np.ones(A_old.shape[2]),
+                  z0 * np.ones(A_old.shape[2])]
+
+        calMx = np.zeros((nMics, 2, harmHi - harmLo + 1),
+                         dtype='complex')
+
+        specInfImp = inf_imp_obj.mean_spectrum
+        specInfImp = specInfImp[harmLo:harmHi+1]
+        calMx[:,0,:] = np.transpose(specInfImp[:,:nMics])
+
+        specInfPipe = inf_pipe_obj.mean_spectrum
+        specInfPipe = specInfPipe[harmLo:harmHi+1]
+        calMx[:,1,:] = np.transpose(specInfPipe[:,:nMics])
+
+        # calculate pressure at ref plane for infinite impedance
+        # for the normal case where the microphone is some distance from the
+        # infinite impedance and the transfter matrix is needed
+        pressure = (specInfImp[:,0] / A_old[0,0,:])
+
+        for frequencyCounter in range(calMx.shape[2]):
+            # calculate the A_n1 terms
+            A[:,0,frequencyCounter] = (calMx[:,0,frequencyCounter]/
+                                       pressure[frequencyCounter])
+            # initialize fitting coefficients
+            coeff = []
+            const = []
+            newRowCoeff = np.zeros(nMics,dtype='complex')
+            newRowCoeff[0] = 1
+            coeff.append(newRowCoeff)
+            newRowConst = (A[0,0,frequencyCounter] *
+                           A[0,1,frequencyCounter] /
+                           A_old[0,0,frequencyCounter])
+            const.append(newRowConst)
+
+            loadNo = 1
+            for j in range(nMics):
+                for k in range(j):
+                    newRowCoeff = np.zeros(nMics,dtype='complex')
+                    newRowCoeff[k] = (z0 * calMx[j,loadNo,frequencyCounter] /
+                                      knownZ[loadNo][frequencyCounter])
+                    newRowCoeff[j] = (-z0 * calMx[k,loadNo,frequencyCounter] /
+                                      knownZ[loadNo][frequencyCounter])
+                    coeff.append(newRowCoeff)
+                    newRowConst = (A[j,0,frequencyCounter] *
+                                   calMx[k,loadNo,frequencyCounter] -
+                                   A[k,0,frequencyCounter] *
+                                   calMx[j,loadNo,frequencyCounter])
+                    const.append(newRowConst)
+
+            # obtain the A_n2 terms by least_squares
+            A[:,1,frequencyCounter],_,_,_ = np.linalg.lstsq(np.array(coeff), 
+                                                      np.array(const),rcond=-1)
+
+        return A
+
     
-    def load_mat_params(self, Parameters):
+    def load_mat_params(self, param_file):
         """
         read parameters from matlab structure Parameters
-        obtained by reading a .mat file with
-
-        mdata = scipy.io.loadmat(matfile, squeeze_me=False,
-                                 variable_names='Parameters')
-        
-        # and then select 
-        
-        Parameters = mdata['Parameters'][0,0]
+        from a matlab .MAT file
         """
-        #self.radius = np.asscalar(Parameters['radius'])
-        for k in Parameters.dtype.names:
-            try:
-                self.__setattr__(k, np.asscalar(Parameters[k]))
-            except ValueError:
-                self.__setattr__(k, Parameters[k])
+        parameters = mat_parameter_from_file(param_file)
+        
+        # only store non-redundant parameters
+        try:
+            self.radius = np.asscalar(parameters['radius'])
+            self.density = np.asscalar(parameters['rho'])
+            self.speed_of_sound = np.asscalar(parameters['speedOfSound'])
+        except KeyError:
+            self.can_recalculate = False
+
+        self.harm_lo = np.asscalar(parameters['harmLo'])
+        self.harm_hi = np.asscalar(parameters['harmHi'])
+        self.num_points = np.asscalar(parameters['numPoints'])
+        self.sr = np.asscalar(parameters['samplingFreq'])
+        try:
+            self.n_channel_first = np.asscalar(parameters['nChannelFirst'])
+        except KeyError:
+            logging.warn('First head channel not defined, setting to 1')
+            self.n_channel_first = 1
+        # self.num_cycles = np.asscalar(parameters['numCycles'])
+        try:
+            self.mic_pos = np.squeeze(parameters['micSpacing'])
+        except KeyError:
+            logging.warning('microphone positions not known')
+            self.mic_pos = None
+
+        assert self.freq_lo == np.asscalar(parameters['freqLo'])
+        assert self.freq_hi == np.asscalar(parameters['freqHi'])
+        assert self.freq_incr == np.asscalar(parameters['freqIncr'])
+        try:
+            self.A = parameters['A'].squeeze()
+        except (KeyError, ValueError):
+            self.can_recalculate = False
+            logging.warn('Calibration matrix not found!')
+            self.A = None
+
+        if not self.can_recalculate:
+            logging.warn('Will not be able to recalculate impedances')
+
+    def bin_number_to_freq(self, bin_no):
+        return self.sr/self.num_points * bin_no
+
+    @property 
+    def cross_section_area(self):
+        return np.pi * self.radius ** 2
+
+    @property 
+    def z0(self):
+        return self.density * self.speed_of_sound / self.cross_section_area
+
+    @property
+    def freq_lo(self):
+        return self.bin_number_to_freq(self.harm_lo)
+
+    @property
+    def freq_hi(self):
+        return self.bin_number_to_freq(self.harm_hi)
+
+    @property
+    def freq_incr(self):
+        return self.bin_number_to_freq(1.)
+
+    @property
+    def frequency_vector(self):
+        return np.arange(self.harm_lo, self.harm_hi+1) * (self.sr /
+                                                       self.num_points)
 
 
 class ImpedanceIteration(object):
@@ -89,15 +277,44 @@ class ImpedanceIteration(object):
         """
 
         self.input_signals = input_signals
-        self.has_output = False
-        self._output_signal = None
-        self.n_samples = self.input_signals.shape(0)
-        self.n_channels = self.input_signals.shape(1)
+        self._output_signal = output_signal
+        self.n_samples = self.input_signals.shape[0]
+        self.n_channels = self.input_signals.shape[1]
         if n_loops is None:
             n_loops = np.floor(self.n_samples / 
                                       len(self.output_signal))
-        self.loop_n_samples = loop_n_samples
-        self.param = parameters
+        self.n_loops = n_loops
+        #self.loop_n_samples = loop_n_samples
+        if type(parameters) is str:
+            self.param = MeasurementParameters(parameters)
+        else:
+            self.param = parameters
+
+        # Minimum number of cycles needed for calculation
+        # of spectral error
+        self.min_cycles_for_error = 8
+            
+        
+        #self.output_signal = output_signal
+
+    @property
+    def mean_impedance(self):
+        param = self.param
+
+        if not param.can_recalculate:
+            raise ValueError('cannot recalculate: missing parameters')
+
+        mean_input_spect, spectral_error = self.calc_mean_spectra(
+                                             nwind=param.num_points,
+                                             window=param.window,
+                                             method=param.spec_method,
+                                             nhop=param.hop)
+        
+        analysis = self.analyse_input(mean_input_spect, spectral_error)
+        imped = analysis['p']/analysis['u']
+        imped = imped.squeeze()
+        self.z = imped
+        return imped 
 
     @property
     def output_signal(self):
@@ -109,7 +326,7 @@ class ImpedanceIteration(object):
             self.has_output=True
             self._output_signal = signal
 
-        if self.n_samples < len(self.ouput_signal):
+        if self.n_samples < len(self.output_signal):
             raise ValueError("input_signal.shape[0] must be smaller than length of output")
         
         new_loop_n = np.floor(self.n_samples/len(self.output_signal)) 
@@ -146,12 +363,13 @@ class ImpedanceIteration(object):
 
         input_waves (N_samples x N_channels)
 
-        optional: 
+        optional:
             discard_loops: remove N loops from beginning and end
-        
+
         returns an array with (samples_per_loop/2+1) X N_loops X N_channels
         """
 
+        input_waves = self.input_signals
 
         nsamp = nwind
         if window is not None:
@@ -210,7 +428,36 @@ class ImpedanceIteration(object):
         self.spectral_error = spectral_error
         return mean_spectrum, spectral_error
 
-    def analyse_input(self):
+    def calc_sigma_var_spectral_error(self, spectral_error):
+        """
+        calculate a weighting variable based on spectral error
+        """
+        # Fit a function of the form Af^n to the noise data,
+        # and replace the noise data with the (smooth) function.
+        fvec = self.param.frequency_vector
+        fit_data = np.array([np.ones(fvec.shape), np.log(fvec)]).T
+        coeff,_,_,_ = lstsq(fit_data,np.log(spectral_error))
+        spectral_error = np.exp(np.dot(fit_data, coeff))
+        sigma_variable = np.transpose(np.array([spectral_error]),
+                                     axes=[2,0,1])
+        return sigma_variable
+
+    def calc_sigma_var_no_error(self):
+        """
+        get a weighting function based on sqrt(freq)
+        when no sepctral error is present
+        """
+ 
+        fvec = self.param.frequency_vector
+        # otherwise, choose a noise function of f^(-0.5)
+        sigma_variable = (fvec**(-0.5) *
+                         np.ones((1,spectral_error.shape[1])))
+        sigma_variable = np.transpose(np.array([sigma_variable]), 
+                                     axes=[2,0,1])
+        return sigma_variable
+
+    def analyse_input(self, mean_spectrum, spectral_error, 
+                      loop_no=-1, meas_type='Averaged'):
         """
         Calculate pressure and flow at reference plane
         """
@@ -218,100 +465,92 @@ class ImpedanceIteration(object):
         rcond = -1
         
         param = self.param
-        num_cycles = param.num_cycles
-        noiseCalculated = numCycles >= 8
+        num_cycles = self.n_loops
+        noise_calculated = num_cycles >= self.min_cycles_for_error 
         #  calculate A and b matrices
         A = param.A
-        harmLo = param.harm_lo
-        harmHi = param.harm_hi
+        harm_lo = param.harm_lo
+        harm_hi = param.harm_hi
         n_channel_first = param.n_channel_first
-        mic_spacing = param.mic_spacing
+        mic_spacing = param.mic_pos
         n_mics = len(mic_spacing)
         # shouldn't it be...
         # nChannelLast = nChannelFirst + nMics
         n_channel_last = n_mics
         fvec = param.frequency_vector
 
-        meanSpectrum = Input['meanSpectrum'].squeeze()
-        totalSpectrum = Input['totalSpectrum'].squeeze()
-        mean_spectrum, spectral_error = self.get_mean_spectra()
+        spectral_error = self.spectral_error[harm_lo:harm_hi+1,
+                                             n_channel_first-1:n_channel_last]
 
-        spectral_error = self.spectral_error[harmLo:harmHi+1, nChannelFirst-1:nChannelLast]
-
-        if noiseCalculated:
-            # Fit a function of the form Af^n to the noise data,
-            # and replace the noise data with the (smooth) function.
-            fitData = np.array([np.ones(fVec.shape), np.log(fVec)]).T
-            coeff,_,_,_ = lstsq(fitData,np.log(spectralError))
-            spectralError = np.exp(np.dot(fitData, coeff))
-            sigmaVariable = np.transpose(np.array([spectralError]),
-                                         axes=[2,0,1])
+        if noise_calculated:
+            sigma_variable = self.calc_sigma_var_spectral_error(spectral_error)
         else:
-            # otherwise, choose a noise function of f^(-0.5)
-            sigmaVariable = (fVec**(-0.5) *
-                             np.ones((1,spectralError.shape[1])))
-            sigmaVariable = np.transpose(np.array([sigmaVariable]), 
-                                         axes=[2,0,1])
+            sigma_variable = self.calc_sigma_var_no_error()
         # pdb.set_trace()
-        if measType == 'Averaged':
-            meanSpecRed = meanSpectrum[harmLo:harmHi+1,nChannelFirst-1:nChannelLast]
-            b = np.transpose(np.array([meanSpecRed]),
+        if meas_type == 'Averaged':
+            mean_spec_red = mean_spectrum[harm_lo:harm_hi+1,
+                                          n_channel_first-1:n_channel_last]
+            b = np.transpose(np.array([mean_spec_red]),
                              axes=[2,0,1])
-        elif measType == 'Individual':
+        elif meas_type == 'Individual':
             # reorder the totalSpectrum vector to match meanSpectrum
-            if nMics == 1:
-                tempSpectrum =\
-                        totalSpectrum[harmLo:harmHi+1, countLoops:countLoops+1, 0];
-            elif nMics == 2:
-                tempSpectrum =\
-                    [totalSpectrum[harmLo:harmHi+1, countLoops:countLoops+1, 0],\
-                     totalSpectrum[harmLo:harmHi+1, countLoops:countLoops+1, 1]]
+            if n_mics == 1:
+                temp_spectrum =\
+                        total_spectrum[harm_lo:harm_hi+1,
+                                       count_loops:count_loops+1, 0];
+            elif n_mics == 2:
+                temp_spectrum =\
+                    [total_spectrum[harm_lo:harm_hi+1,
+                                    count_loops:count_loops+1, 0],\
+                     total_spectrum[harm_lo:harm_hi+1,
+                                    count_loops:count_loops+1, 1]]
             else:
-                tempSpectrum =\
-                    [totalSpectrum[harmLo: harmHi+1, countLoops:countLoops+1, 0],\
-                    totalSpectrum[harmLo: harmHi+1, countLoops:countLoops+1, 1],\
-                    totalSpectrum[harmLo: harmHi+1, countLoops:countLoops+1, 2]]
+                temp_spectrum =\
+                    [total_spectrum[harm_lo: harm_hi+1,
+                                    count_loops:countLoops+1, 0],\
+                    total_spectrum[harm_lo: harm_hi+1,
+                                   count_loops:count_loops+1, 1],\
+                    total_spectrum[harm_lo: harm_hi+1, count_loops:count_loops+1, 2]]
 
-            b = np.transpose(tempSpectrum, axes=[0,2,1])
+            b = np.transpose(temp_spectrum, axes=[0,2,1])
 
         # initialise p, u, deltap and deltau
         p = np.zeros((A.shape[2],1), dtype='complex')
-        deltap = np.zeros((A.shape[2],1), dtype='complex')
+        delta_p = np.zeros((A.shape[2],1), dtype='complex')
         u = np.zeros_like(p)
-        deltau = np.zeros_like(deltap)
-        for freqCount in range(A.shape[2]): # length of frequency vector
+        delta_u = np.zeros_like(delta_p)
+        for freq_count in range(A.shape[2]): # length of frequency vector
             # Calculate the covariant matrix by putting the elements of
             # sigmaVariable along the diagonal
-            covar = np.diag(sigmaVariable[:,0,freqCount]**2)
+            covar = np.diag(sigma_variable[:,0,freq_count]**2)
             # if only two mics, calculate x using backslash operator
             # i.e. solve A*x = B for x
-            if nMics == 1:
-                x,_,_,_ = lstsq(A[:,:,freqCount], b[:,:,freqCount])
+            if n_mics == 1:
+                x,_,_,_ = lstsq(A[:,:,freq_count], b[:,:,freq_count])
                 # matrix is not square so use pseudoinverse
                 Ainv = pinv(A[:,:,freqCount])
-            elif nMics == 2:
-                x,_,_,_ = lstsq(A[:,:,freqCount], b[:,:,freqCount])
-                Ainv = np.linalg.inv(A[:,:,freqCount])
+            elif n_mics == 2:
+                x,_,_,_ = lstsq(A[:,:,freq_count], b[:,:,freq_count])
+                Ainv = np.linalg.inv(A[:,:,freq_count])
             else:
                 # otherwise, use a weighted least-squares to determine x
                 # weighted least squares solution to A*x = b with weighting covar
-                x,_,_,_ = lscov(A[:,:,freqCount], b[:,0,freqCount], covar,
+                x,_,_,_ = lscov(A[:,:,freq_count], b[:,0,freq_count], covar,
                                 rcond=rcond)
-                Ainv = pinv(A[:,:,freqCount])
+                Ainv = pinv(A[:,:,freq_count])
             # Use the inverse (or pseudoinverse) to calculate dx
             dx = np.sqrt(np.diag(np.dot(np.dot(Ainv, covar),
                                  Ainv.T)))
             # Calculate the impedance and its error
-            Z0 = Parameters['Z0'].squeeze()
-            p[freqCount] = x[0]
-            u[freqCount] = x[1] / Z0
-            deltap[freqCount] = dx[0]
-            deltau[freqCount] = dx[1] / Z0
+            Z0 = param.z0
+            p[freq_count] = x[0]
+            u[freq_count] = x[1] / Z0
+            delta_p[freq_count] = dx[0]
+            delta_u[freq_count] = dx[1] / Z0
 
-        return dict(p=p, u=u, deltap=deltap, deltau=deltau, z0=Z0)
+        return dict(p=p, u=u, delta_p=delta_p, delta_u=delta_u, z0=Z0)
 
 
-        
 
 
 class ImpedanceMeasurement(object):
@@ -324,23 +563,14 @@ class ImpedanceMeasurement(object):
 
     def __init__(self, filename=None, paramfile=None,
                  freqLo=None, freqIncr=1.0):
+        self.iterations = []
         if filename is not None:
             fileext = os.path.basename(filename)
             base = os.path.splitext(fileext)
             self.name = os.path.basename(base[0])
             format = self.detectFormat(filename)
             if format == 'v6':
-                self.readImpedance6(filename)
-                if paramfile is None:
-                    paramfile = self.lookForParams(filename)
-
-                if paramfile is not None:
-                    self.readParams(paramfile)
-                else:
-                    if freqLo is not None:
-                        self.buildFreqVect(freqLo, freqIncr)
-                    else:
-                        self.buildFreqVect(0.0, freqIncr)
+                self.readImpedance6(filename, paramfile=paramfile)
 
             elif format == 'v7':
                 self.readImpedance(filename)
@@ -348,6 +578,7 @@ class ImpedanceMeasurement(object):
                 raise IOError('Unrecognised format for the impedance file')
         else:
             raise IOError("File not found:'%s", filename)
+
 
         # Keep track of derived impedances
         self.dernum = 0
@@ -367,21 +598,49 @@ class ImpedanceMeasurement(object):
     def readImpedance(self, filename):
         # Read the mathfile
         mm = matlab.loadmat(filename)
+        #self.parameters = mm['Parameters'][0,0]
 
-        # The vector of interest is now called meanZ 
-        # equivalent to Z in version 6
-        z = mm['Iteration'][0, 0]['meanZ']
+        self.parameters = MeasurementParameters(filename)
 
-        flo = mm['Parameters']['freqLo'][0, 0][0, 0]
-        fhi = mm['Parameters']['freqHi'][0, 0][0, 0]
+        miter = mm['Iteration'].flatten()
+        out_sig = mm['Iteration'][0,0]['Output'][0,0]['waveform']
 
-        npoints = len(z)
-        f = np.linspace(flo, fhi, npoints)
+        self.iterations = []
+        for ii in range(len(miter)):
+            in_sig = miter[ii]['Input'][0,0]['originalWaveform']
+            this_it = ImpedanceIteration(input_signals=in_sig,
+                                  output_signal=out_sig,
+                                  parameters=self.parameters)
+        
+            self.iterations.append(this_it)
 
-        self.f = f
-        self.z = z
+        assert len(self.iterations) > 0, 'no iteration measurements found!'
+        self.z = miter[-1]['meanZ'].squeeze()
 
-    def readImpedance6(self, filename):
+    @property
+    def f(self):
+        return self.parameters.frequency_vector
+
+    @property
+    def mean_spectrum(self):
+        last_iter = self.iterations[-1]
+        mean_spec, spec_err = last_iter.calc_mean_spectra(discard_loops=1)
+        return mean_spec
+
+    def calculate_impedance(self):
+        """
+        recalculates the impedance from raw signals
+        
+        new impedance is stored in ImpedanceMeasurement.z
+        """
+
+        iteration = self.iterations[-1]
+        self.z = iteration.mean_impedance
+        return iteration.z
+
+
+
+    def readImpedance6(self, filename, paramfile=None):
         """
         Loads an Impedance 6 matlab structure.
         Parameter file is supplied in keyword argument paramfile
@@ -389,17 +648,44 @@ class ImpedanceMeasurement(object):
         freqency vector
         """
         data = matlab.loadmat(filename)
+        if paramfile is None:
+            paramfile = self.lookForParams(filename)
 
+        if paramfile is not None:
+            parameters = MeasurementParameters(paramfile)
+        else:
+            # guess parameters from impedance file
+            try:
+                last_iter = data['iteration'].flatten()[-1]
+                #spec = last_iter['input'][0,0]
+                output = last_iter['output'][0,0]['waveform']
+                num_points = output.shape[0]
+                parameters = MeasurementParameters(num_points=num_points)
+            except KeyError:
+                logging.warn('could not guess parameters')
+                parameters = MeasurementParameters()
+            
+        self.parameters = parameters
+        miter = data['iteration'].flatten()
+        last_iter = miter[-1]
+        out_sig = data['iteration'][0,0]['output'][0,0]['waveform']
+        
+        for ii in range(len(miter)):
+            in_sig = miter[ii]['input'][0,0]['waveform']
+            this_it = ImpedanceIteration(input_signals=in_sig,
+                                  output_signal=out_sig,
+                                  parameters=self.parameters)
+        
+            self.iterations.append(this_it)
+
+
+        
         try:
-            z = data['iteration'][-1]['Z'][-1]
+            z = last_iter['Z']
         except ValueError:
-            z = data['iteration']['analysis'][-1, -1]['Z'][-1]
+            z = last_iter['analysis'][0,0]['Z']
 
         self.z = z
-
-    def buildFreqVect(self, freqLo=0.0, freqIncr=1.0):
-        npoints = len(self.z)
-        self.f = freqLo + np.arange(npoints)*freqIncr
 
     def lookForParams(self, filename):
         """
@@ -423,20 +709,9 @@ class ImpedanceMeasurement(object):
                         for xx in dirlist].index(True)
                 return os.path.join(parentdir, dirlist[fidx])
             except ValueError:
-                sys.stderr.write('Could not find a parameter file')
+                logging.warn('Could not find a parameter file')
                 return None
 
-    def readParams(self, paramfile):
-        pp = matlab.loadmat(paramfile)
-        try:
-            ppp = pp['PARAMS']
-        except KeyError:
-            ppp = pp
-        freqLo = np.squeeze(ppp['freqLo'])
-        freqHi = np.squeeze(ppp['freqHi'])
-        freqIncr = np.squeeze(ppp['freqIncr'])
-
-        self.buildFreqVect(freqLo, freqIncr)
 
 def lscov(a, b, w, rcond=None):
     """
