@@ -73,7 +73,16 @@ class UNSWTests(unittest.TestCase):
 
         for ii in range(n_comp):
             ind = tuple((np.array(old_a.shape)*np.random.rand(3)).astype('i'))
+
             #self.assertAlmostEqual(old_a[ind],new_a[ind],places=3)
+
+    def test_to_interpolated_impedance(self):
+        io = ImpedanceMeasurement(v7filename)
+        ti = io.as_interpolated_impedance()
+        for ii in range(n_comp):
+            ind = np.random.randint(len(io.f))
+            f = io.f[ind]
+            self.assertEqual(io.z[ind],ti._get_impedance_at_freq(f))
     
     def test_select_mics(self):
         

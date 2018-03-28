@@ -21,6 +21,7 @@ from ._impedance import Impedance
 from copy import copy, deepcopy
 import logging
 from itertools import combinations
+from .Synthesiser import InterpolatedImpedance
 
 from scipy.linalg import pinv, lstsq
 
@@ -856,6 +857,7 @@ class ImpedanceMeasurement(object):
         new_param = self.parameters.use_mics(channel_list)
         new_it = []
         for it in self.iterations:
+            it.param = new_param
             new_it.append(it.use_mics(channel_list))
             
         new_meas = ImpedanceMeasurement(parameters=new_param)
@@ -936,6 +938,13 @@ class ImpedanceMeasurement(object):
                 logging.warn('Could not find a parameter file')
                 return None
 
+    def as_interpolated_impedance(self, radius=None):
+        if radius is None:
+            radius = self.parameters.radius
+        imp = InterpolatedImpedance(radius=radius)
+        z0 = self.parameters.z0
+        imp.set_points(self.f,self.z/z0)
+        return imp
 
 def lscov(a, b, w, rcond=None):
     """

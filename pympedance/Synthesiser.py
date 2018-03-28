@@ -631,6 +631,26 @@ class FlangedPiston(TerminationImpedance):
         """
         return 1j/2*f*self.get_medium_density()
 
+class InterpolatedImpedance(TerminationImpedance):
+    """
+    Represents a measurement to be fitted to a model
+    """
+
+    def __init__(self, radius=0.1):
+        super(InterpolatedImpedance,self).__init__()
+        self._f = np.array([0,20000])
+        self._z = np.array([0,0])
+        self.radius = radius
+        self.interp_kwargs = {'kind': 'linear'}
+        self._reset_impedance()
+
+
+    def _get_impedance_at_freq(self, f):
+        return np.interp(f, self._f, self._z)
+
+    def set_points(self, f, z):
+        self._f = f
+        self._z = z
 
 class PerfectClosedEnd(TerminationImpedance):
     """
@@ -854,6 +874,14 @@ class Duct(PortImpedance):
  
 
         return z*self.char_impedance
+
+    def as_interpolated_impedance(self, f=None):
+        imp = InterpolatedImpedance(radius=self.get_radius_at_position(0.0))
+        z0 = self.char_impedance
+        imp.set_points(f,self.get_input_impedance_at_freq(f)/z0)
+        return imp
+
+
 
     def get_coords(self):
         old_x = 0
