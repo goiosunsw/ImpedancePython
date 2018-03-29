@@ -10,6 +10,9 @@ setup(name='pympedance',
       license='GPL v3',
       packages=['pympedance'],
       install_requires=[
+          'numpy',
+          'scipy',
+          'matplotlib',
           'xmltodict'
       ],
       zip_safe=False)

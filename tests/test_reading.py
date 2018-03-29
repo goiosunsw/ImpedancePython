@@ -27,20 +27,20 @@ class UNSWTests(unittest.TestCase):
     def test_read_UNSW_v7_params(self):
         par = mat_parameter_from_file(v7filename)
         assert par is not None
-        
+
     def test_read_UNSW_v6_params(self):
         par = mat_parameter_from_file(v6parfile)
         assert par is not None
 
     def test_read_UNSW_v6_file(self):
-        self.assertRaises(KeyError, 
-                          mat_parameter_from_file, 
+        self.assertRaises(KeyError,
+                          mat_parameter_from_file,
                           v6filename)
 
     def test_UNSW_versionID_v6(self):
         iro = ImpedanceMeasurement(v6filename)
         assert iro.detectFormat(v6filename) == 'v6'
-    
+
     def test_UNSW_versionID_v7(self):
         iro = ImpedanceMeasurement(v7filename)
         assert iro.detectFormat(v7filename) == 'v7'
@@ -83,9 +83,9 @@ class UNSWTests(unittest.TestCase):
             ind = np.random.randint(len(io.f))
             f = io.f[ind]
             self.assertEqual(io.z[ind],ti._get_impedance_at_freq(f))
-    
+
     def test_select_mics(self):
-        
+
         io = ImpedanceMeasurement(v7filename)
         new_mics = (0,2)
         io2 = io.use_mics(new_mics)

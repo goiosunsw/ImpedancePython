@@ -4,7 +4,7 @@
 import scipy.io as sio
 import pylab as pl
 import numpy as np
-import PeakFinder as pf
+from . import PeakFinder as pf
 #import AcousticResonator as ar
 
 def GetImpedance6(mm, paramfile=None, freqLo=0.0, freqIncr=1.0):
