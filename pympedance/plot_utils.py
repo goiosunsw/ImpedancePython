@@ -44,6 +44,12 @@ def bodeplot(f, h, xscale='lin', yscale='db', ax=None, **kwargs):
     ax[0].plot(x,yabs,**kwargs)
     ax[1].plot(f,yarg,**kwargs)
     
+    if xscale == 'log':
+        ax[0].set_xscale('log')
+        ax[1].set_xscale('log')
+    if yscale == 'log':
+        ax[0].set_yscale('log')
+    
     yrange = np.diff(ax[1].get_ylim())
     npi = yrange/np.pi
     pifrac = 2*np.pi/yrange
