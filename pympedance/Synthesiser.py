@@ -7,7 +7,9 @@ Uses global parameters contained in phys_params
 
 import numpy as np
 import sys
+import logging
 import matplotlib.pyplot as pl
+import matplotlib as mpl
 from ._impedance import Impedance as imp
 from copy import copy
 from scipy.special import struve, j1
@@ -855,6 +857,12 @@ class Duct(PortImpedance):
 
         from_nbr, from_el = self.get_element_at_position(min(edges))
         to_nbr, to_el = self.get_element_at_position(max(edges))
+
+        if from_pos > to_pos:
+            reverse = True
+        else:
+            reverse = False
+
         if reverse:
             for el_nbr in range(to_nbr,from_nbr-1,-1):
                 el = self.elements[el_nbr]
@@ -1073,8 +1081,47 @@ class Duct(PortImpedance):
                                             freq=freq))
         return mx
 
+    def var_transfer_func(self, freq=np.array([1.0]), 
+                          from_pos=0.0, to_pos=None,
+                          var='pressure'):
+        """
+        get the ratios of pressures at two positions in the duct
+        """
+        total_length = self.get_total_length()
+        if to_pos is None:
+            # sys.stderr.write('\nsetting position to {}\n'.format(total_length))
+            end_pos = total_length
+        else:
+            end_pos = to_pos
+
+
+        tmx = self.transfer_mx_at_freq(freq, from_pos=from_pos,
+                                        to_pos=to_pos)
+        z0 = (self.get_input_impedance_at_freq(freq,
+                                               from_pos=from_pos))
+
+        # set dummy variable to zero if z0 is infinite
+        # (this will prevent nan for infinite impedances)
+        one = np.isfinite(z0)
+        z0[np.logical_not(one)] = 1.
+
+        imx = np.array([[1*one,z0],[1/z0,1*one]])
+        trx = np.matmul(tmx.transpose(2,0,1),
+                        imx.transpose(2,0,1)).transpose(1,2,0)
+
+        if var=='pressure':
+            return trx[0,0,:]
+        elif var=='flow':
+            return trx[1,1,:]
+        elif var=='transpedance':
+            return trx[0,1,:]
+        elif var=='transmittance':
+            return trx[1,0,:]
+        else:
+            return trx
+
     def pressure_transfer_func(self, freq=1.0, from_pos=0.0,
-                               to_pos=None, ref_pos=None):
+                               to_pos=None, ref_pos=None, var='pressure'):
         """
         get the ratios of pressures at two positions in the duct
         """
@@ -1099,13 +1146,14 @@ class Duct(PortImpedance):
         # (this will prevent nan for infinite impedances)
         one = np.isfinite(z0)
         z0[np.logical_not(one)] = 1.
-        tfp = (cmx2[0,0]*z0 + cmx2[0,1]*one) / \
-              (cmx1[0,0]*z0 + cmx1[0,1]*one)
+        if var=='pressure':
+            tfp = (cmx2[0,0]*z0 + cmx2[0,1]*one) / \
+                  (cmx1[0,0]*z0 + cmx1[0,1]*one)
         return tfp
 
     def radiation_transpedance(vt,f=[1]):
         """
-        Return radio of:
+        Return ratio of:
             * radiated pressure divided by
             * input flow
         """
@@ -1121,7 +1169,7 @@ class Duct(PortImpedance):
             transp[ii] = aout[1] * vt.termination.far_field_transpedance(ff)
         return transp
 
-    def plot_geometry(self, ax=None):
+    def plot_geometry(self, ax=None, vert=False):
         """
         plot a transverse section of the duct
 
@@ -1134,12 +1182,65 @@ class Duct(PortImpedance):
         else:
             newfig = False
         x, y = self.get_coords()
-        ln = ax.plot(x, y)
-        ax.plot(x, -np.array(y), color=ln[0].get_color())
+        if vert:
+            ln = ax.plot(y,x)
+            ax.plot(-np.array(y),x, color=ln[0].get_color())
+        else:
+            ln = ax.plot(x, y)
+            ax.plot(x, -np.array(y), color=ln[0].get_color())
         if newfig:
             ax.set_xlabel('distance from input (m)')
             ax.set_ylabel('radial distance (m)')
         return ax
+
+    def plot_acoustic_distribution(self, ax=None, n_freq=500, 
+                                   fmin=1.0, fmax=4000.,
+                                   n_len = 200,
+                                   var='pressure', x_ref=0, phase=False):
+        """
+        plot the distribution of pressure or flow along the duct,
+        relative to the variable at x_ref
+
+        use n_freq frequency values and n_len points along the duct
+        """
+
+        xmax = self.get_total_length()
+        pos_vec = np.linspace(0, xmax, n_len)
+        fvec = np.linspace(fmin, fmax, n_freq)
+        tpl = [self.var_transfer_func(from_pos=x_ref,
+                                      to_pos=pos,
+                                      freq=fvec, 
+                                      var=var)
+               for pos in pos_vec]
+        tp = np.array(tpl)
+
+        if ax is None:
+            fig,ax = pl.subplots(1)
+
+        #cmap=pl.get_cmap('coolwarm')
+        cmap=pl.get_cmap('viridis')
+
+        if phase:
+            pvar = 20*np.log10(np.abs(tp))
+            prang = np.max(pvar)-np.min(pvar)
+            imgr = (pvar - np.min(pvar))/prang
+            # imgr = (np.array([pvar,pvar,pvar]) - 
+            #        np.min(pvar))/prang
+            # imgr = imgr.transpose(1,2,0)
+
+            ph = np.mod(np.angle(tp),np.pi*2)/np.pi/2
+            imghsv = np.array([ph,np.ones(imgr.shape),imgr]).transpose(1,2,0)
+            img = mpl.colors.hsv_to_rgb(imghsv)
+
+            ax.imshow(img,
+                      extent=[fmin,fmax,0.,xmax],
+                      aspect='auto', origin='lower')
+        else:
+            ax.imshow(20*np.log10(np.abs(tp)),
+                      extent=[fmin,fmax,0.,xmax],
+                      aspect='auto', origin='lower',cmap=cmap)
+             
+
 
     def plot_report(self, ax=None, fmin=50.0,
                     fmax=2000, npoints=200, scale_type='log'):
