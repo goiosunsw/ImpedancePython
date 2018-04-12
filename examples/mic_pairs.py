@@ -14,7 +14,10 @@ script_path, _ = os.path.split(os.path.realpath(__file__))
 print(script_path)
 
 # The actual impedance measurement file
-meas_file = os.path.join(script_path, '../tests/data/i.mat')
+try:
+    meas_file = sys.argv[1]
+except IndexError:
+    meas_file = os.path.join(script_path, '../tests/data/i.mat')
 
 # homedir = os.environ['HOME']
 # basedir = os.path.join(homedir,'/home/goios/Data/20180221-26mmHead/')
