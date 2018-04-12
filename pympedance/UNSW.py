@@ -847,6 +847,23 @@ class ImpedanceMeasurement(object):
         self.z = iteration.mean_impedance
         return iteration.z
 
+    def get_pressure_flow(self, average=True):
+        """
+        returns the spectral pressure and flow at the reference plane
+        """
+
+        iteration = self.iterations[-1]
+        
+        param = self.parameters
+        mean_input_spect, spectral_error = iteration.calc_mean_spectra(
+                                             nwind=param.num_points,
+                                             window=param.window,
+                                             method=param.spec_method,
+                                             nhop=param.hop)
+        analysis = iteration.analyse_input(mean_input_spect, spectral_error)
+        return analysis['p'].squeeze(), analysis['u'].squeeze()
+
+
     def use_mics(self, channel_list, 
                  inf_imp_obj=None,
                  inf_pipe_obj=None):
