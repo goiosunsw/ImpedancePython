@@ -2,3 +2,7 @@
 **/*.pyc
 # Ignore vim swap files
 **/*.swp
+# Ignore ipynb checkpoints
+**/.ipynb_checkpoints
+# Ignore egg-info
+**/*.egg-info
