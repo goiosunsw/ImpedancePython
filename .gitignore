@@ -6,3 +6,6 @@
 **/.ipynb_checkpoints
 # Ignore egg-info
 **/*.egg-info
+# Ignore distribution directories
+build
+dist
