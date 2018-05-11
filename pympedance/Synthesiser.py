@@ -798,6 +798,21 @@ class Duct(PortImpedance):
         new_duct.element_positions = copy(new_duct.element_positions)
         return new_duct
 
+    def reverse(self, termination=None):
+        """
+        return the reversed duct
+        (by default with open end)
+        """
+        new_duct = Duct()
+        for ii,el,st,ed in self.iter_elements_in_interval(
+            from_pos=self.get_total_length(), to_pos=0.0):
+            new_duct.append_element(el)
+
+        if termination is None:
+            termination = PerfectOpendEnd()
+        new_duct.set_termination(termination)
+        return new_duct
+
     def new_with_attached_load(self, load):
         """
         returns a new duct object with the load attached
