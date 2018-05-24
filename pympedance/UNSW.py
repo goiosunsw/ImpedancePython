@@ -1018,7 +1018,7 @@ def lscov(a, b, w, rcond=None):
 def waveform_to_spectrum(waveform, num_points=None):
     if num_points is None:
         num_points = waveform.shape[0]
-    spectrum = np.fft.fft(waveform, n=num_points, axis=0, norm="ortho")
+    spectrum = np.fft.fft(waveform, n=num_points, axis=0)
     # only keep non-trivial points
     harmHi = int(np.floor(num_points/2))
     spectrum = spectrum[:harmHi+1]
@@ -1029,7 +1029,7 @@ def waveform_to_spectrum(waveform, num_points=None):
 
     return spectrum
 
-def spectrumtowaveform(spectrum, num_points=None, harm_lo=0):
+def spectrum_to_waveform(spectrum, num_points=None, harm_lo=0):
     """
     spectrumtowaveform Calculates the waveform for a given spectrum.
     The ifft is performed on the columns of spectrum.
@@ -1040,25 +1040,34 @@ def spectrumtowaveform(spectrum, num_points=None, harm_lo=0):
 
     if num_points is None:
         harm_hi = spectrum.shape[0]
-        num_points = harm_hi*2
+        num_points = (harm_hi-1)*2
     else:
-        harm_hi = np.floor(num_points / 2)
-    spec = np.zeros((num_points,spectrum.shape[1]), dtype='complex')
+        harm_hi = int(np.floor(num_points / 2))+1
+    
+    try:
+        spec = np.zeros((num_points,spectrum.shape[1]), dtype='complex')
+    except IndexError:
+        spec = np.zeros(num_points, dtype='complex')
     # throw out any freqeuncy components that will not contribute
-    spec[harm_lo:harm_hi,:] = spectrum[:spec.shape[0],:]
+    try:
+        spec[harm_lo:harm_hi] = spectrum[:spec.shape[0]]
+    except (IndexError, ValueError):
+        max_spec = min(harm_hi-1,len(spectrum)+harm_lo)
+        spec[harm_lo:max_spec] = spectrum
 
     # fix up the dc component
-    spec[0,:] = spec[0,:] * 2
+    spec[0] = spec[0] * 2
     # un-normalise the points
     spec = spec * num_points / 2
     # add the extra points
-    new_points = spec[1:np.ceil(num_points / 2),:]
+    new_points = spec[1:harm_hi-1]
     new_points = np.conj(new_points)
     new_points = np.flipud(new_points)
-    spectrum = np.concatenate([spectrum,new_points])
+    spec[harm_hi:] = new_points
     # take the ifft
-    waveform = np.fft.ifft(spectrum, num_points, 1)
+    waveform = np.fft.ifft(spec, axis=0)
     waveform = waveform.real
+    return waveform
 
 def build_mic_spectra(input_waves, 
                       excitation_signal=None,
