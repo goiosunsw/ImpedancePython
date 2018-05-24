@@ -963,6 +963,40 @@ class ImpedanceMeasurement(object):
         imp.set_points(self.f,self.z/z0)
         return imp
 
+
+class BroadBandExcitation(object):
+    """
+    a broadband signal that repeats with an integer number of samples
+
+    can be shaped to a desired spectrum profile
+    """
+    def __init__(self, n_points=1024, n_cycles=1):
+        """
+        creates a broadband "noise" signal object
+        """
+        self.n_points = n_points
+        self.n_cycles = n_cycles
+        self.harm_lo = harm_lo
+        self.harm_hi = harm_hi
+        self.spectrum = np.ones(int(n_points/2))
+    
+    def generate_cycle(self):
+        """
+        generates a single cycle of the the sound
+        """
+        spec = self.spectrum * 2*np.pi*np.rand.random(self.spectrum.shape[0])
+        x = spectrum_to_waveform(self.spectrum, sel.n_points)
+        
+
+
+    def generate_sound(self):
+        """
+        generates the sound to a numpy 1 x n_points x n_cycles vector
+        """
+
+        cycle = self.generate_cycle()
+        return np.tile(cycle, self.n_cycles)
+
 def lscov(a, b, w, rcond=None):
     """
     calculates the weighted least squared solution to
@@ -994,6 +1028,37 @@ def waveform_to_spectrum(waveform, num_points=None):
     spectrum[0] = spectrum[0] / 2
 
     return spectrum
+
+def spectrumtowaveform(spectrum, num_points=None, harm_lo=0):
+    """
+    spectrumtowaveform Calculates the waveform for a given spectrum.
+    The ifft is performed on the columns of spectrum.
+
+    note this uses the Matlab function spectrum that will be removed in a
+    future release (after 2014b) - so needs to be updated
+    """
+
+    if num_points is None:
+        harm_hi = spectrum.shape[0]
+        num_points = harm_hi*2
+    else:
+        harm_hi = np.floor(num_points / 2)
+    spec = np.zeros((num_points,spectrum.shape[1]), dtype='complex')
+    # throw out any freqeuncy components that will not contribute
+    spec[harm_lo:harm_hi,:] = spectrum[:spec.shape[0],:]
+
+    # fix up the dc component
+    spec[0,:] = spec[0,:] * 2
+    # un-normalise the points
+    spec = spec * num_points / 2
+    # add the extra points
+    new_points = spec[1:np.ceil(num_points / 2),:]
+    new_points = np.conj(new_points)
+    new_points = np.flipud(new_points)
+    spectrum = np.concatenate([spectrum,new_points])
+    # take the ifft
+    waveform = np.fft.ifft(spectrum, num_points, 1)
+    waveform = waveform.real
 
 def build_mic_spectra(input_waves, 
                       excitation_signal=None,
