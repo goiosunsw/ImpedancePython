@@ -138,6 +138,16 @@ class UNSWTests(unittest.TestCase):
     def test_read_UNSW_v7(self):
         io = read_UNSW_impedance(v7filename)
 
+class GenericFunctionTests(unittest.TestCase):
+    def test_spectrum_to_wavform_single_channel_all_points(self):
+        npts=8
+        x=np.random.rand(npts)
+        fx=np.fft.fft(x)
+        spec_x = fx[:int(npts/2+1)]/npts*2
+        spec_x[0]/=2
+        xi=spectrum_to_waveform(spec_x)
+        for el_orig, el_tr in zip(x,xi):
+            self.assertAlmostEqual(el_orig,el_tr)
 
 def main():
     unittest.main()
