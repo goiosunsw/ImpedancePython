@@ -212,7 +212,8 @@ class MeasurementParameters(object):
                 if load_file is not None:
                     calib_measurements[load_name] = \
                     ImpedanceMeasurement(filename=load_file,
-                                         parameters=self)
+                                         parameters=self,
+                                         is_calibration=True)
 
                 spec_name = 'spec_'+load_name
                 try:
@@ -399,11 +400,11 @@ class MeasurementParameters(object):
             self.A = parameters['A'].squeeze()
         except (KeyError, ValueError):
             self.can_recalculate = False
-            logging.warn('Calibration matrix not found!')
+            #logging.warn('Calibration matrix not found!')
             self.A = None
 
-        if not self.can_recalculate:
-            logging.warn('Will not be able to recalculate impedances')
+        #if not self.can_recalculate:
+        #    logging.warn('Will not be able to recalculate impedances')
 
         param_path = os.path.split(param_file)[0]
         cal_path = os.path.join(param_path,'../calib/')
@@ -476,7 +477,7 @@ class MeasurementParameters(object):
         R = 10**(2.0*np.log10(ka) - 0.3)
         X = 10**(0.99*np.log10(ka) - 0.09)
         z_load = R + 1j*X
-        z_load *= self.z0
+        #z_load *= self.z0
         return z_load
 
 
@@ -794,7 +795,8 @@ class ImpedanceMeasurement(object):
     """
 
     def __init__(self, filename=None, paramfile=None,
-                 freqLo=None, freqIncr=1.0, parameters=None):
+                 freqLo=None, freqIncr=1.0, parameters=None,
+                 is_calibration=False):
         self.iterations = []
         self.parameters = None
         if filename is not None:
