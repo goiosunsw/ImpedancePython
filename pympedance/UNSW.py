@@ -21,6 +21,7 @@ from ._impedance import Impedance
 from copy import copy, deepcopy
 import logging
 from itertools import combinations
+from collections import OrderedDict
 from .Synthesiser import InterpolatedImpedance
 
 from scipy.linalg import pinv, lstsq
@@ -147,12 +148,16 @@ class MeasurementParameters(object):
                                            parameters=self)
         inf_pipe_obj = ImpedanceMeasurement(filename=infinite_pipe_file,
                                            parameters=self)
+        inf_flange_obj = ImpedanceMeasurement(filename=infinite_flange_file,
+                                           parameters=self)
 
         param_pairs = []
         channel_pairs = []
         for mic_pair in itertools.combinations(range(nMics),2):
             inf_imp_mod = inf_imp_obj.use_mics(mic_pair)
             inf_pipe_mod = inf_pipe_obj.use_mics(mic_pair)
+            inf_flange_mod = inf_flange_obj.use_mics(mic_pair)
+
             param_mod = self.use_mics(mic_pair)
             new_a = param_mod.calc_calibration_matrix(inf_imp_mod,
                                                       inf_pipe_mod)
@@ -178,32 +183,51 @@ class MeasurementParameters(object):
             [n_channels X 2 X n_freq_bins]
         """
 
+        file_names = (infinite_imp_file, infinite_pipe_file,
+                      infinite_flange_file)
+
+        objects = (infinite_imp_obj, infinite_pipe_obj,
+                      infinite_flange_obj)
+       
+        
+        load_order = ('inf_imp','inf_pipe','inf_flange')
+        
+
         files_given = (infinite_imp_file is not None and 
                        infinite_pipe_file is not None)
         
-        if files_given:
-            imp_args = {'filename':infinite_imp_file,
-                        'parameters':self}
-            infinite_imp_obj = ImpedanceMeasurement(**imp_args)
-            imp_args['filename'] = infinite_pipe_file
-            infinite_pipe_obj = ImpedanceMeasurement(**imp_args)
+        calib_measurements = OrderedDict()
+        calib_spectra = OrderedDict()
 
         A_old = self.A
         harmLo = self.harm_lo
         harmHi = self.harm_hi
 
-        specInfImp = infinite_imp_obj.mean_spectrum
-        specInfImp = specInfImp[harmLo:harmHi+1]
+        for load_name, load_file, load_obj in zip(load_order,
+                                                  file_names,
+                                                  objects):
 
-        specInfPipe = infinite_pipe_obj.mean_spectrum
-        specInfPipe = specInfPipe[harmLo:harmHi+1]
-        
-        return self.calc_calibration_matrix_from_spectra(specInfImp,
-                                                         specInfPipe)
+            calib_measurements[load_name] = load_obj
+            if load_obj is None:
+                if load_file is not None:
+                    calib_measurements[load_name] = \
+                    ImpedanceMeasurement(filename=load_file,
+                                         parameters=self)
+
+                spec_name = 'spec_'+load_name
+                try:
+                    spec = calib_measurements[load_name].mean_spectrum
+                    calib_spectra[spec_name] = spec[harmLo:harmHi+1]
+                except AttributeError:
+                    calib_spectra[spec_name] = None
+
+
+        return self.calc_calibration_matrix_from_spectra(**calib_spectra)
 
     def calc_calibration_matrix_from_spectra(self,
-                                             spec_inf_imp,
-                                             spec_inf_pipe):
+                                             spec_inf_imp=None,
+                                             spec_inf_pipe=None,
+                                             spec_inf_flange=None):
         """
         Calculate the calibration matrix given the spectra
         obtained for the calibration loads:
@@ -211,6 +235,13 @@ class MeasurementParameters(object):
             * infinite pipe
         """
 
+        load_order = ('inf_imp','inf_pipe','inf_flange')
+
+        given_spec = {
+            'inf_imp': spec_inf_imp,
+            'inf_pipe': spec_inf_pipe,
+            'inf_flange': spec_inf_flange}
+        
         A_old = self.A
         A = copy(A_old)
         z0 = self.z0
@@ -224,14 +255,23 @@ class MeasurementParameters(object):
         nChannelLast = nMics
         fVec = self.frequency_vector
 
-        knownZ = [np.inf*np.ones(A_old.shape[2]),
-                  z0 * np.ones(A_old.shape[2])]
+        known_impedances={
+            'inf_imp': np.inf*np.ones(A_old.shape[2]),
+            'inf_pipe': z0 * np.ones(A_old.shape[2]),
+            'inf_flange': self.theoretical_flange(fVec)}
+        
+        calMx = []
+        knownZ = []
 
-        calMx = np.zeros((nMics, 2, harmHi - harmLo + 1),
-                         dtype='complex')
+        for load in load_order:
+            v = given_spec[load]
+            if v is not None:
+                knownZ.append(known_impedances[load])
 
-        calMx[:,0,:] = np.transpose(spec_inf_imp[:,:nMics])
-        calMx[:,1,:] = np.transpose(spec_inf_pipe[:,:nMics])
+                calMx.append(v[:,:nMics])
+
+        calMx = np.array(calMx).transpose((2,0,1))
+        print(calMx.shape)
 
         # calculate pressure at ref plane for infinite impedance
         # for the normal case where the microphone is some distance from the
@@ -276,7 +316,8 @@ class MeasurementParameters(object):
 
     def use_mics(self, channel_list, 
                  inf_imp_obj=None, 
-                 inf_pipe_obj=None):
+                 inf_pipe_obj=None,
+                 inf_flange_obj=None):
         """
         return a copy of the iteration with selected channels
         """
@@ -288,6 +329,9 @@ class MeasurementParameters(object):
 
         if inf_pipe_obj is None:
             inf_pipe_obj = default_calib['inf_pipe']
+
+        if inf_flange_obj is None:
+            inf_flange_obj = default_calib['inf_flange']
 
         new_param = copy(self)
         initial_number_of_channels = len(self.mic_pos)
@@ -368,7 +412,7 @@ class MeasurementParameters(object):
 
     def find_calib_files(self,
                          calib_dict={'inf_imp':'InfImpCalib.mat',
-                                     'inf_pipe_file':'InfPipeCalib.mat',
+                                     'inf_pipe':'InfPipeCalib.mat',
                                      'inf_flange':'InfFlangeCalib.mat'},
                          try_paths=None):
 
@@ -422,6 +466,19 @@ class MeasurementParameters(object):
     def frequency_vector(self):
         return np.arange(self.harm_lo, self.harm_hi+1) * (self.sr /
                                                        self.num_points)
+
+    def theoretical_flange(self, freq=None):
+        if freq is None:
+            freq = self.frequency_vector()
+
+        omega = 2*np.pi*freq
+        ka = (omega/self.speed_of_sound) * self.radius
+        R = 10**(2.0*np.log10(ka) - 0.3)
+        X = 10**(0.99*np.log10(ka) - 0.09)
+        z_load = R + 1j*X
+        z_load *= self.z0
+        return z_load
+
 
 
 class ImpedanceIteration(object):
@@ -1379,3 +1436,4 @@ def resample_calibration(Parameters,
         ParametersNew['A'] = A
     return ParametersNew, old_to_new_fidx 
 
+    
