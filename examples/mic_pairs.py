@@ -7,7 +7,7 @@ import scipy.io as sio
 from pympedance.UNSW import *
 from pympedance.plot_utils import bodeplot
 
-pl.style.use('ggplot')
+#pl.style.use('ggplot')
 
 # Define path for the data
 script_path, _ = os.path.split(os.path.realpath(__file__))
