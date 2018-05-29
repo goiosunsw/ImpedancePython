@@ -69,7 +69,7 @@ if args.no_flange:
 
 print('Calibration dict:')
 for k,v in calib_args.items():
-    print('  '+k+': '+v)
+    print('  '+k+': '+str(v))
 
 # Plot it
 fig,ax = bodeplot(io.f,io.z)
