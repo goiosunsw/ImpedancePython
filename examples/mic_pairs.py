@@ -36,9 +36,6 @@ mic_pairs, pair_sets = io.get_mic_pair_set()
 for pair, pset in zip(mic_pairs, pair_sets):
     # Plot the new impedance on top of the first one
     bodeplot(pset.f,pset.z, ax=ax, label=str(pair),lw=1)
+
 pl.legend()
 pl.show()
-
-
-
-
