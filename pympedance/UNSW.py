@@ -33,15 +33,15 @@ def obj_extract_mics(obj, initial_number_of_channels=3,
     objMod = deepcopy(obj)
     for k in objMod.dtype.names:
         sh = objMod[k].shape
-        
+
         idx = [slice(None) for ii in sh]
-        try: 
+        try:
             micDim = sh.index(initial_number_of_channels)
             idx[micDim] = useMics
         except ValueError:
             pass
-            
-            
+
+
         objMod[k] = objMod[k][idx]
         #print(k, sh)
         #print(k,objMod[k].shape)
@@ -93,7 +93,7 @@ def mat_parameter_from_file(matfile):
 
 
 class MeasurementParameters(object):
-    def __init__(self, from_mat=None, num_points=1024, 
+    def __init__(self, from_mat=None, num_points=1024,
                  harm_lo=0, harm_hi=-1, window=None,
                  method='fft', nhop=None,
                  inf_imp_obj=None,
@@ -133,8 +133,143 @@ class MeasurementParameters(object):
             self.hop = nhop
 
         self.spec_method = method
+        self.min_cycles_for_error = 8
 
+    def calc_sigma_var_spectral_error(self, spectral_error):
+        """
+        calculate a weighting variable based on spectral error
+        """
+        # Fit a function of the form Af^n to the noise data,
+        # and replace the noise data with the (smooth) function.
+        fvec = self.frequency_vector
+        fit_data = np.array([np.ones(fvec.shape), np.log(fvec)]).T
+        coeff,_,_,_ = lstsq(fit_data,np.log(spectral_error))
+        spectral_error = np.exp(np.dot(fit_data, coeff))
+        sigma_variable = np.transpose(np.array([spectral_error]),
+                                     axes=[2,0,1])
+        return sigma_variable
 
+    def calc_sigma_var_no_error(self):
+        """
+        get a weighting function based on sqrt(freq)
+        when no sepctral error is present
+        """
+
+        fvec = self.frequency_vector
+        # otherwise, choose a noise function of f^(-0.5)
+        n_mics = len(self.mic_pos)
+        n_freq = fvec.shape[0]
+        sqrtfv = np.tile(fvec**(-.5),(n_mics,1)).T
+        sigma_variable = (sqrtfv *
+                         np.ones((n_freq,n_mics)))
+        sigma_variable = np.transpose(np.array([sigma_variable]),
+                                     axes=[2,0,1])
+        return sigma_variable
+
+    def analyse_input(self, mean_spectrum, spectral_error=None):
+        """
+        Calculate pressure and flow at reference plane
+        """
+
+        rcond = -1
+
+        param = self
+        noise_calculated = spectral_error is not None
+        #  calculate A and b matrices
+        A = param.A
+        harm_lo = param.harm_lo
+        harm_hi = param.harm_hi
+        n_channel_first = param.n_channel_first
+        mic_spacing = param.mic_pos
+        n_mics = len(mic_spacing)
+        # shouldn't it be...
+        # nChannelLast = nChannelFirst + nMics
+        n_channel_last = n_mics
+
+        if noise_calculated:
+            sigma_variable = self.calc_sigma_var_spectral_error(spectral_error)
+        else:
+            sigma_variable = self.calc_sigma_var_no_error()
+            # reorder the totalSpectrum vector to match meanSpectrum
+            # if n_mics == 1:
+            #     temp_spectrum =\
+            #             [mean_spectrum[harm_lo:harm_hi+1, 0]]
+            # elif n_mics == 2:
+            #     temp_spectrum =\
+            #         [mean_spectrum[harm_lo:harm_hi+1, 0],
+            #          mean_spectrum[harm_lo:harm_hi+1, 1]]
+            # else:
+            #     temp_spectrum =\
+            #         [mean_spectrum[harm_lo: harm_hi+1, 0],
+            #          mean_spectrum[harm_lo: harm_hi+1, 1],
+            #          mean_spectrum[harm_lo: harm_hi+1, 2]]
+
+        temp_spectrum = mean_spectrum[harm_lo:harm_hi+1,
+                                      n_channel_first-1:n_channel_last]
+
+        b = np.transpose(np.array([temp_spectrum]),
+                         axes=[2,0,1])
+
+        # initialise p, u, deltap and deltau
+        p = np.zeros((A.shape[2],1), dtype='complex')
+        delta_p = np.zeros((A.shape[2],1), dtype='complex')
+        u = np.zeros_like(p)
+        delta_u = np.zeros_like(delta_p)
+        for freq_count in range(A.shape[2]): # length of frequency vector
+            # Calculate the covariant matrix by putting the elements of
+            # sigmaVariable along the diagonal
+            covar = np.diag(sigma_variable[:,0,freq_count]**2)
+            # if only two mics, calculate x using backslash operator
+            # i.e. solve A*x = B for x
+            if n_mics == 1:
+                x,_,_,_ = lstsq(A[:,:,freq_count], b[:,:,freq_count])
+                # matrix is not square so use pseudoinverse
+                Ainv = pinv(A[:,:,freqCount])
+            elif n_mics == 2:
+                x,_,_,_ = lstsq(A[:,:,freq_count], b[:,:,freq_count])
+                Ainv = np.linalg.inv(A[:,:,freq_count])
+            else:
+                # otherwise, use a weighted least-squares to determine x
+                # weighted least squares solution to A*x = b with weighting covar
+                x,_,_,_ = lscov(A[:,:,freq_count], b[:,0,freq_count], covar,
+                                rcond=rcond)
+                Ainv = pinv(A[:,:,freq_count])
+            # Use the inverse (or pseudoinverse) to calculate dx
+            dx = np.sqrt(np.diag(np.dot(np.dot(Ainv, covar),
+                                 Ainv.T)))
+            # Calculate the impedance and its error
+            Z0 = param.z0
+            p[freq_count] = x[0]
+            u[freq_count] = x[1] / Z0
+            delta_p[freq_count] = dx[0]
+            delta_u[freq_count] = dx[1] / Z0
+
+        return dict(p=p, u=u, delta_p=delta_p, delta_u=delta_u, z0=Z0)
+
+    def get_pressure_flow(self, mic_vec, freq=1.0):
+        """
+        Calculate pressure and flow at a given frequency,
+        given microphone spectra at that frequency
+        """
+        calib_freq = self.frequency_vector
+
+        try:
+            ind_below = np.flatnonzero(freq < calib_freq)[-1]
+            ind_above = np.flatnonzero(freq > calib_freq)[0]
+            frac = freq-calib_freq[ind_below]/(calib_freq[ind_above] -
+                                               calib_freq[ind_below])
+        except ValueError:
+            if freq > np.max(calib_freq):
+                ind_below = ind_above = len(calib_freq)
+            elif freq < np.min(calib_freq):
+                ind_below = ind_above = 0
+            frac = 0
+
+        mic_vec_tile = np.tile(mic_vec,(self.A.shape[2],1))
+        pflow_below = np.matmul(self.A[:,:,ind_below], mic_vec)
+        pflow_above = np.matmul(self.A[:,:,ind_above], mic_vec)
+        pflow = pflow_below*(1-frac) + pflow_above*frac
+        return pflow
 
     def calc_calibration_matrices_mic_pairs(self,
                                             infinite_imp_file,
@@ -188,14 +323,14 @@ class MeasurementParameters(object):
 
         objects = (infinite_imp_obj, infinite_pipe_obj,
                       infinite_flange_obj)
-       
-        
-        load_order = ('inf_imp','inf_pipe','inf_flange')
-        
 
-        files_given = (infinite_imp_file is not None and 
+
+        load_order = ('inf_imp','inf_pipe','inf_flange')
+
+
+        files_given = (infinite_imp_file is not None and
                        infinite_pipe_file is not None)
-        
+
         calib_measurements = OrderedDict()
         calib_spectra = OrderedDict()
 
@@ -243,7 +378,7 @@ class MeasurementParameters(object):
             'inf_imp': spec_inf_imp,
             'inf_pipe': spec_inf_pipe,
             'inf_flange': spec_inf_flange}
-        
+
         A_old = self.A
         A = copy(A_old)
         z0 = self.z0
@@ -261,7 +396,7 @@ class MeasurementParameters(object):
             'inf_imp': np.inf*np.ones(A_old.shape[2]),
             'inf_pipe': z0 * np.ones(A_old.shape[2]),
             'inf_flange': self.theoretical_flange(fVec)}
-        
+
         calMx = []
         knownZ = []
 
@@ -311,19 +446,19 @@ class MeasurementParameters(object):
                     const.append(newRowConst)
 
             # obtain the A_n2 terms by least_squares
-            A[:,1,frequencyCounter],_,_,_ = np.linalg.lstsq(np.array(coeff), 
+            A[:,1,frequencyCounter],_,_,_ = np.linalg.lstsq(np.array(coeff),
                                                       np.array(const),rcond=-1)
 
         return A
 
-    def use_mics(self, channel_list, 
-                 inf_imp_obj=None, 
+    def use_mics(self, channel_list,
+                 inf_imp_obj=None,
                  inf_pipe_obj=None,
                  inf_flange_obj=None):
         """
         return a copy of the iteration with selected channels
         """
-        
+
         default_calib = self.get_calibration_objects()
 
         if inf_imp_obj is None:
@@ -342,9 +477,9 @@ class MeasurementParameters(object):
                 sh = new_param.__dict__[k].shape
             except AttributeError:
                 sh = []
-            
+
             idx = [slice(None) for ii in sh]
-            try: 
+            try:
                 micDim = sh.index(initial_number_of_channels)
                 idx[micDim] = channel_list
                 new_param.__dict__[k] = self.__dict__[k][idx]
@@ -366,14 +501,14 @@ class MeasurementParameters(object):
             new_param.a = new_a
 
         return new_param
-    
+
     def load_mat_params(self, param_file):
         """
         read parameters from matlab structure Parameters
         from a matlab .MAT file
         """
         parameters = mat_parameter_from_file(param_file)
-        
+
         # only store non-redundant parameters
         try:
             self.radius = np.asscalar(parameters['radius'])
@@ -448,11 +583,11 @@ class MeasurementParameters(object):
     def bin_number_to_freq(self, bin_no):
         return self.sr/self.num_points * bin_no
 
-    @property 
+    @property
     def cross_section_area(self):
         return np.pi * self.radius ** 2
 
-    @property 
+    @property
     def z0(self):
         return self.density * self.speed_of_sound / self.cross_section_area
 
@@ -492,13 +627,13 @@ class ImpedanceIteration(object):
     Implements a single iteration of a measurement,
     with a particular output waveform and collected data
     """
-    def __init__(self, input_signals, output_signal=None, 
+    def __init__(self, input_signals, output_signal=None,
                  n_loops=None, parameters=None):
         """
         start iteration object with the input (measured) signals,
         which is the response of the system to an output_signal.
 
-        The output signal is looped n_loops times 
+        The output signal is looped n_loops times
 
         input_signal is N_samples X N_channels
         """
@@ -508,7 +643,7 @@ class ImpedanceIteration(object):
         self.n_samples = self.input_signals.shape[0]
         self.n_channels = self.input_signals.shape[1]
         if n_loops is None:
-            n_loops = np.floor(self.n_samples / 
+            n_loops = np.floor(self.n_samples /
                                       len(self.output_signal))
         self.n_loops = int(n_loops)
         #self.loop_n_samples = loop_n_samples
@@ -520,8 +655,8 @@ class ImpedanceIteration(object):
         # Minimum number of cycles needed for calculation
         # of spectral error
         self.min_cycles_for_error = 8
-            
-        
+
+
         #self.output_signal = output_signal
 
     @property
@@ -536,12 +671,12 @@ class ImpedanceIteration(object):
                                              window=param.window,
                                              method=param.spec_method,
                                              nhop=param.hop)
-        
+
         analysis = self.analyse_input(mean_input_spect, spectral_error)
         imped = analysis['p']/analysis['u']
         imped = imped.squeeze()
         self.z = imped
-        return imped 
+        return imped
 
     @property
     def output_signal(self):
@@ -555,8 +690,8 @@ class ImpedanceIteration(object):
 
         if self.n_samples < len(self.output_signal):
             raise ValueError("input_signal.shape[0] must be smaller than length of output")
-        
-        new_loop_n = np.floor(self.n_samples/len(self.output_signal)) 
+
+        new_loop_n = np.floor(self.n_samples/len(self.output_signal))
         if self.n_loops != new_loop_n:
             warnings.warn("new number of loops adjusted to %d\n"
                           % new_loop_n)
@@ -661,7 +796,7 @@ class ImpedanceIteration(object):
         mean_spectrum = np.nanmean(total_spectrum, axis=1)
         spectral_error = np.nanstd(total_spectrum, axis=1, ddof=1)
         num_cycles = total_spectrum.shape[1]
-        
+
         self.mean_spectrum = mean_spectrum
         self.spectral_error = spectral_error
         return mean_spectrum, spectral_error
@@ -685,26 +820,26 @@ class ImpedanceIteration(object):
         get a weighting function based on sqrt(freq)
         when no sepctral error is present
         """
- 
+
         fvec = self.param.frequency_vector
         # otherwise, choose a noise function of f^(-0.5)
         sigma_variable = (fvec**(-0.5) *
                          np.ones((1,spectral_error.shape[1])))
-        sigma_variable = np.transpose(np.array([sigma_variable]), 
+        sigma_variable = np.transpose(np.array([sigma_variable]),
                                      axes=[2,0,1])
         return sigma_variable
 
-    def analyse_input(self, mean_spectrum, spectral_error, 
+    def analyse_input(self, mean_spectrum, spectral_error,
                       loop_no=-1, meas_type='Averaged'):
         """
         Calculate pressure and flow at reference plane
         """
 
         rcond = -1
-        
+
         param = self.param
         num_cycles = self.n_loops
-        noise_calculated = num_cycles >= self.min_cycles_for_error 
+        noise_calculated = num_cycles >= self.min_cycles_for_error
         #  calculate A and b matrices
         A = param.A
         harm_lo = param.harm_lo
@@ -842,7 +977,7 @@ class ImpedanceMeasurement(object):
         # Read the mathfile
         mm = matlab.loadmat(filename)
         #self.parameters = mm['Parameters'][0,0]
-        
+
         if not skip_params:
             self.parameters = MeasurementParameters(filename,
                                                    uncalibrated = self.uncalibrated)
@@ -857,7 +992,7 @@ class ImpedanceMeasurement(object):
             this_it = ImpedanceIteration(input_signals=in_sig,
                                   output_signal=out_sig,
                                   parameters=self.parameters)
-        
+
             self.iterations.append(this_it)
 
         assert len(self.iterations) > 0, 'no iteration measurements found!'
@@ -865,7 +1000,7 @@ class ImpedanceMeasurement(object):
 
     def get_channels_spectra(self, channel_list):
         """
-        returns the chopped spectra corresponding to 
+        returns the chopped spectra corresponding to
         channel_list
         """
 
@@ -901,11 +1036,10 @@ class ImpedanceMeasurement(object):
         last_iter = self.iterations[-1]
         return last_iter.mean_waveform
 
-
     def calculate_impedance(self):
         """
         recalculates the impedance from raw signals
-        
+
         new impedance is stored in ImpedanceMeasurement.z
         """
 
@@ -919,7 +1053,7 @@ class ImpedanceMeasurement(object):
         """
 
         iteration = self.iterations[-1]
-        
+
         param = self.parameters
         mean_input_spect, spectral_error = iteration.calc_mean_spectra(
                                              nwind=param.num_points,
@@ -940,7 +1074,7 @@ class ImpedanceMeasurement(object):
         for it in self.iterations:
             it.param = new_param
             new_it.append(it.use_mics(channel_list))
-            
+
         new_meas = ImpedanceMeasurement(parameters=new_param)
         new_meas.iterations = new_it
         return new_meas
@@ -951,7 +1085,7 @@ class ImpedanceMeasurement(object):
         """
         Loads an Impedance 6 matlab structure.
         Parameter file is supplied in keyword argument paramfile
-        or alternatively, supply freqLo and freqIncr to build 
+        or alternatively, supply freqLo and freqIncr to build
         freqency vector
         """
         data = matlab.loadmat(filename)
@@ -971,22 +1105,22 @@ class ImpedanceMeasurement(object):
             except KeyError:
                 logging.warn('could not guess parameters')
                 parameters = MeasurementParameters()
-            
+
         self.parameters = parameters
         miter = data['iteration'].flatten()
         last_iter = miter[-1]
         out_sig = data['iteration'][0,0]['output'][0,0]['waveform']
-        
+
         for ii in range(len(miter)):
             in_sig = miter[ii]['input'][0,0]['waveform']
             this_it = ImpedanceIteration(input_signals=in_sig,
                                   output_signal=out_sig,
                                   parameters=self.parameters)
-        
+
             self.iterations.append(this_it)
 
 
-        
+
         try:
             z = last_iter['Z']
         except ValueError:
@@ -1043,14 +1177,14 @@ class BroadBandExcitation(object):
         self.harm_lo = harm_lo
         self.harm_hi = harm_hi
         self.spectrum = np.ones(int(n_points/2))
-    
+
     def generate_cycle(self):
         """
         generates a single cycle of the the sound
         """
         spec = self.spectrum * 2*np.pi*np.rand.random(self.spectrum.shape[0])
         x = spectrum_to_waveform(self.spectrum, sel.n_points)
-        
+
 
 
     def generate_sound(self):
@@ -1107,7 +1241,7 @@ def spectrum_to_waveform(spectrum, num_points=None, harm_lo=0):
         num_points = (harm_hi-1)*2
     else:
         harm_hi = int(np.floor(num_points / 2))+1
-    
+
     try:
         spec = np.zeros((num_points,spectrum.shape[1]), dtype='complex')
     except IndexError:
@@ -1133,7 +1267,7 @@ def spectrum_to_waveform(spectrum, num_points=None, harm_lo=0):
     waveform = waveform.real
     return waveform
 
-def build_mic_spectra(input_waves, 
+def build_mic_spectra(input_waves,
                       excitation_signal=None,
                       discard_loops=0,
                       nwind=1024,
@@ -1145,7 +1279,7 @@ def build_mic_spectra(input_waves,
 
     input_waves (N_samples x N_channels)
 
-    optional: 
+    optional:
         discard_loops: remove N loops from beginning and end
 
     returns Input dict with
@@ -1200,8 +1334,8 @@ def build_mic_spectra(input_waves,
 
     return inputdict
 
-def analyseinput(Input, Parameters, 
-                 measType='Averaged', 
+def analyseinput(Input, Parameters,
+                 measType='Averaged',
                  countLoops=0):
     """
     analyseinput takes the spectra and determines pressure and flow (u) to
@@ -1244,7 +1378,7 @@ def analyseinput(Input, Parameters,
         # otherwise, choose a noise function of f^(-0.5)
         sigmaVariable = (fVec**(-0.5) *
                          np.ones((1,spectralError.shape[1])))
-        sigmaVariable = np.transpose(np.array([sigmaVariable]), 
+        sigmaVariable = np.transpose(np.array([sigmaVariable]),
                                      axes=[2,0,1])
     # pdb.set_trace()
     if measType == 'Averaged':
@@ -1305,7 +1439,7 @@ def analyseinput(Input, Parameters,
     return dict(p=p, u=u, deltap=deltap, deltau=deltau, z0=Z0)
 
 
-def recalc_calibration(InfPipe=None, 
+def recalc_calibration(InfPipe=None,
                        InfImp=None,
                        InfFlange=None,
                        Parameters=None):
@@ -1314,7 +1448,7 @@ def recalc_calibration(InfPipe=None,
     measurements
     """
 
-    
+
     A_old = Parameters['A'].squeeze()
     A = copy(A_old)
     z0 = Parameters['Z0'].squeeze()
@@ -1381,12 +1515,12 @@ def recalc_calibration(InfPipe=None,
                 const.append(newRowConst)
 
         # obtain the A_n2 terms by least_squares
-        A[:,1,frequencyCounter],_,_,_ = np.linalg.lstsq(np.array(coeff), 
+        A[:,1,frequencyCounter],_,_,_ = np.linalg.lstsq(np.array(coeff),
                                                   np.array(const),rcond=-1)
 
     return A
 
-def resample_calibration(Parameters, 
+def resample_calibration(Parameters,
                          InfImp=None,
                          InfPipe=None,
                          resamp=1):
@@ -1394,7 +1528,7 @@ def resample_calibration(Parameters,
     Resample (downsample only) a known calibration by decimating
     the calibration matrix
 
-    resamp is the factor by which to resample the calibration 
+    resamp is the factor by which to resample the calibration
 
     new measurements will be based on Parameters['numPoints']/resamp
     points
@@ -1410,7 +1544,7 @@ def resample_calibration(Parameters,
 
     old_to_new_fidx = old_to_new_bins[fvec_mask] - harmLo + 1
     #pdb.set_trace()
-    ParametersNew['numPoints'] = int(numPoints / resamp) 
+    ParametersNew['numPoints'] = int(numPoints / resamp)
     ParametersNew['A'] = Parameters['A'][:,:,old_to_new_fidx]
     ParametersNew['A_old'] = Parameters['A_old'][:,:,old_to_new_fidx]
     ParametersNew['calibrationMatrix'] = Parameters['calibrationMatrix'][:,:,old_to_new_fidx]
@@ -1441,5 +1575,4 @@ def resample_calibration(Parameters,
                                InfImp =Input_mod[1],
                                Parameters=Parameters)
         ParametersNew['A'] = A
-    return ParametersNew, old_to_new_fidx 
-
+    return ParametersNew, old_to_new_fidx
