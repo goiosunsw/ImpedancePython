@@ -166,7 +166,7 @@ class MeasurementParameters(object):
                                      axes=[2,0,1])
         return sigma_variable
 
-    def analyse_input(self, mean_spectrum, spectral_error=None):
+    def analyse_input(self, mean_spectrum, spectral_error=None, indices=None):
         """
         Calculate pressure and flow at reference plane
         """
@@ -176,9 +176,15 @@ class MeasurementParameters(object):
         param = self
         noise_calculated = spectral_error is not None
         #  calculate A and b matrices
-        A = param.A
-        harm_lo = param.harm_lo
-        harm_hi = param.harm_hi
+
+        if indices is None:
+            harms = np.arange(param.harm_lo, param.harm_hi+1)
+            indices = range(A.shape[2])
+        else:
+            harms = np.array(indices)+param.harm_lo
+
+        A = param.A[:,:,indices]
+
         n_channel_first = param.n_channel_first
         mic_spacing = param.mic_pos
         n_mics = len(mic_spacing)
@@ -204,18 +210,18 @@ class MeasurementParameters(object):
             #          mean_spectrum[harm_lo: harm_hi+1, 1],
             #          mean_spectrum[harm_lo: harm_hi+1, 2]]
 
-        temp_spectrum = mean_spectrum[harm_lo:harm_hi+1,
+        temp_spectrum = mean_spectrum[harms,
                                       n_channel_first-1:n_channel_last]
 
         b = np.transpose(np.array([temp_spectrum]),
                          axes=[2,0,1])
 
         # initialise p, u, deltap and deltau
-        p = np.zeros((A.shape[2],1), dtype='complex')
-        delta_p = np.zeros((A.shape[2],1), dtype='complex')
-        u = np.zeros_like(p)
-        delta_u = np.zeros_like(delta_p)
-        for freq_count in range(A.shape[2]): # length of frequency vector
+        p = [] #np.zeros((A.shape[2],1), dtype='complex')
+        delta_p = [] #np.zeros((A.shape[2],1), dtype='complex')
+        u = [] #np.zeros_like(p)
+        delta_u = [] #np.zeros_like(delta_p)
+        for freq_count, ii in enumerate(indices): # length of frequency vector
             # Calculate the covariant matrix by putting the elements of
             # sigmaVariable along the diagonal
             covar = np.diag(sigma_variable[:,0,freq_count]**2)
@@ -239,36 +245,56 @@ class MeasurementParameters(object):
                                  Ainv.T)))
             # Calculate the impedance and its error
             Z0 = param.z0
-            p[freq_count] = x[0]
-            u[freq_count] = x[1] / Z0
-            delta_p[freq_count] = dx[0]
-            delta_u[freq_count] = dx[1] / Z0
+            # p[freq_count] = x[0]
+            # u[freq_count] = x[1] / Z0
+            # delta_p[freq_count] = dx[0]
+            # delta_u[freq_count] = dx[1] / Z0
+            p.append(x[0])
+            u.append(x[1]/Z0)
+            delta_p.append(dx[0])
+            delta_u.append(dx[1]/Z0)
 
-        return dict(p=p, u=u, delta_p=delta_p, delta_u=delta_u, z0=Z0)
+        return dict(p=np.array(p),
+                    u=np.array(u),
+                    delta_p=np.array(delta_p),
+                    delta_u=np.array(delta_u),
+                    z0=Z0)
 
-    def get_pressure_flow(self, mic_vec, freq=1.0):
+    def get_pressure_flow(self, mic_vec, freq=1.0,
+                          interp='nearest'):
         """
         Calculate pressure and flow at a given frequency,
         given microphone spectra at that frequency
         """
         calib_freq = self.frequency_vector
+        mic_vec_tile = np.tile(mic_vec, (int(self.num_points/2)+1, 1))
 
-        try:
-            ind_below = np.flatnonzero(freq < calib_freq)[-1]
-            ind_above = np.flatnonzero(freq > calib_freq)[0]
-            frac = freq-calib_freq[ind_below]/(calib_freq[ind_above] -
-                                               calib_freq[ind_below])
-        except ValueError:
-            if freq > np.max(calib_freq):
-                ind_below = ind_above = len(calib_freq)
-            elif freq < np.min(calib_freq):
-                ind_below = ind_above = 0
-            frac = 0
+        if interp == 'linear':
+            try:
+                ind_below = np.flatnonzero(calib_freq < freq)[-1]
+                ind_above = np.flatnonzero(calib_freq > freq)[0]
+                frac = (freq-calib_freq[ind_below])/(calib_freq[ind_above] -
+                                                     calib_freq[ind_below])
+            except ():#IndexError:
+                if freq > np.max(calib_freq):
+                    ind_below = ind_above = len(calib_freq)
+                elif freq < np.min(calib_freq):
+                    ind_below = ind_above = 0
+                frac = 0
 
-        mic_vec_tile = np.tile(mic_vec,(self.A.shape[2],1))
-        pflow_below = np.matmul(self.A[:,:,ind_below], mic_vec)
-        pflow_above = np.matmul(self.A[:,:,ind_above], mic_vec)
-        pflow = pflow_below*(1-frac) + pflow_above*frac
+            pflow_vec = self.analyse_input(mic_vec_tile,
+                                           indices=[ind_below, ind_above])
+            pflow = dict()
+            for k, v in pflow_vec.items():
+                try:
+                    var_below = v[0]
+                    var_above = v[1]
+                    pflow[k] = var_below*(1-frac) + var_above*frac
+                except TypeError:
+                    pflow[k] = v
+        elif interp == 'nearest':
+            ind = np.argmin(np.abs(calib_freq-freq))
+            pflow = self.analyse_input(mic_vec_tile,indices=[ind])
         return pflow
 
     def calc_calibration_matrices_mic_pairs(self,
