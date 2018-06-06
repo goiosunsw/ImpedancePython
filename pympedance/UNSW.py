@@ -297,6 +297,38 @@ class MeasurementParameters(object):
             pflow = self.analyse_input(mic_vec_tile,indices=[ind])
         return pflow
 
+    def resampled(self,resamp=1):
+        """
+        Resample (downsample only) a known calibration by decimating
+        the calibration matrix
+
+        resamp is the factor by which to resample the calibration
+
+        new measurements will be based on Parameters['numPoints']/resamp
+        points
+        """
+        new_param = deepcopy(self)
+
+        old_to_new_bins = np.arange(0,self.num_points+1,resamp)
+        fvec_mask = np.logical_and(old_to_new_bins >= self.harm_lo-1,
+                                   old_to_new_bins <= self.harm_hi-1)
+
+        old_to_new_fidx = old_to_new_bins[fvec_mask] - self.harm_lo + 1
+        #pdb.set_trace()
+        new_param.num_points = int(self.num_points / resamp)
+        new_param.A = self.A[:,:,old_to_new_fidx]
+        #new_param.A_old = self.A_old[:,:,old_to_new_fidx]
+        #new_param.calibrationMatrix = self.calibration_matrix[:,:,old_to_new_fidx]
+        #new_param.pressure = self.pressure[old_to_new_fidx]
+        #new_param.frequency_vector = self.frequency_vector[old_to_new_fidx]
+        #new_param['k'] = Parameters['k'][old_to_new_fidx]
+        new_param.harm_lo = np.flatnonzero(old_to_new_bins >=
+                                                 self.harm_lo-1)[0]
+        new_param.harm_hi = np.flatnonzero(old_to_new_bins <=
+                                                 self.harm_hi-1)[-1]
+
+        return new_param
+
     def calc_calibration_matrices_mic_pairs(self,
                                             infinite_imp_file,
                                             infinite_pipe_file,
