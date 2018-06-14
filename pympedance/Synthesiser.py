@@ -360,6 +360,216 @@ class DuctSection(object):
         self._recalc()
 
 
+class ConicalDuct(DuctSection):
+    """
+    Conical section of a duct
+    """
+    def __init__(self, length=0.5, radius_in=0.01, radius_out=0.1, 
+                 loss_multiplier=None):
+        """
+        create a conical section
+
+        parameters:
+            * length (m)
+            * radius_in (m): input radius
+            * radius_out (m): output radius
+            * loss_multiplier: increases viscothermal losses by factor
+        """
+        super(ConicalDuct, self).__init__()
+        self.radius_in = radius_in
+        self.radius_out = radius_out
+        self.radius = .5 * (self.radius_in+self.radius_out)
+        self.length = length
+
+        self._recalc()
+        self.loss_multiplier = loss_multiplier
+
+    def _recalc(self):
+        """
+        recalculate internal variables:
+            * characteristic impedance
+            * boundary layer coefficients
+        """
+
+        self._reset_impedance()
+        # self.cross_section = np.pi*self.get_input_radius()**2
+        rvc_per_rad, rtc_per_rad = self.get_boundary_layer_constants()
+        self.rv_const = rvc_per_rad * self.radius
+        self.rt_const = rtc_per_rad * self.radius
+        if self.parent:
+            self.losses = self.parent.losses
+        else:
+            self.losses = True
+
+    def get_propagation_coefficient(self, freq):
+        """
+        returns the propagation coefficient at given frequency
+
+        the propagation coefficient is the equivalent of "k"
+        as in exp(j k l))
+
+        it includes a real part, close to omega/c
+        and a positive imaginary part, corresponding to distributed
+        losses
+        """
+        if not self.losses:
+            return 2*np.pi*freq/self.get_speed_of_sound()
+        else:
+            return self._propagation_coeff(freq)
+
+    def get_output_radius(self):
+        return self.radius_out
+
+    def get_radius_at_position(self, position=0.0):
+        """
+        return the radius of the element at a given position (in m)
+        """
+        length = self.get_length()
+        r_in = self.radius_in
+        drad = self.radius_out - r_in
+        return drad*position/length + r_in
+
+    def _propagation_coeff(self, freq):
+        """
+        calcualtion of the propagation coefficient at given frequency
+        """
+        c = self.get_speed_of_sound()
+        rho = self.get_medium_density()
+
+        omega = 2 * np.pi * freq
+        # k = omega/c
+
+        rv = self.rv_const * np.sqrt(freq)
+        rt = self.rt_const * np.sqrt(freq)
+
+        P = np.sqrt(2)/rv
+        PQ = (self.gamma-1)*np.sqrt(2)/rt
+        Zv = omega*rho*(P*(1.+3.*P/2.)+1j*(1.+P))
+        Yt = omega/(rho*c**2) *\
+                (PQ*(1.-PQ/(2*(self.gamma-1.)))+1j*(1.+PQ))
+
+        # propagation constant
+
+        G = np.sqrt(Zv*Yt)
+        if self.loss_multiplier is None:
+            # characteristic impedance
+            # Zeta    = np.sqrt(Zv/Yt)/s
+            return ((G)/1j)
+        else:
+            return np.imag(G)-1j*np.real(G)*self.loss_multiplier
+
+    def travelling_mx_at_freq(self, freq=0.0):
+        """
+        return the travelling wave matrix T of the complete
+        duct section.
+
+        [p_out, p_in]_end = T [p_out, p_in]_start
+
+        same as StraightDuct.normalized_two_point_transfer_mx_at_freq(
+                    freq=freq, start_pos=0,
+                    end_pos=StraightDuct.get_length())
+        """
+        return self.two_point_travelling_mx_at_freq(freq=freq)
+
+    def two_point_travelling_mx_at_freq(self, freq=0.0,
+                                        from_pos=0.0, to_pos=None):
+        """
+        return the travelling wave matrix T of the
+        duct section between from_pos to end_pos.
+
+        [p_out, p_in]_from_pos = T [p_out, p_in]_to_pos
+        """
+
+        if to_pos is None:
+            to_pos = self.get_length()
+
+        # distance = to_pos-from_pos
+        # phase = 2*np.pi*freq*distance/self.get_speed_of_sound()
+
+        distance = to_pos-from_pos
+
+        prop_coeff = self.get_propagation_coefficient(freq)
+        phase = prop_coeff*distance
+
+        return np.array([[np.exp(1j*phase), 0],
+                         [0, np.exp(-1j*phase)]])
+
+    def transfer_mx_at_freq(self, freq=0.0):
+        """
+        return the transfer matrix M of the
+        duct section between the two edges of the section.
+
+        [p, u]_end = M [p, u]_start
+        """
+        mx = self.normalized_two_point_transfer_mx_at_freq(freq=freq)
+        mx[0, 1] *= self.impedance_multiplier
+        mx[1, 0] /= self.impedance_multiplier
+        return mx
+
+    def normalized_transfer_mx_at_freq(self, freq=0.0):
+        """
+        return the normalized transfer matrix M of the
+        duct section between the two edges pf the section.
+
+        [p, Zc u]_end = M [p, Zc u]_start
+        """
+        return self.normalized_two_point_transfer_mx_at_freq(freq=freq)
+
+    def get_distance_to_apex(self, pos):
+        """
+        get the distance to apex of cone frustum
+        """
+        length = self.get_length()
+        r_in = self.get_input_radius()
+        r_out = self.get_output_radius()
+        apex = r_in/(r_out-r_in)*length
+        return apex+pos
+
+    def normalized_two_point_transfer_mx_at_freq(self, freq=0.0,
+                                                 from_pos=0.0,
+                                                 to_pos=None,
+                                                 reverse=False):
+
+        """
+        return the normalized transfer matrix M of the
+        duct section between from_pos to end_pos.
+
+        [p, Zc u]_from_pos = M [p, Zc u]_to_pos
+        """
+        if to_pos is None:
+            to_pos = self.get_length()
+
+        distance = to_pos-from_pos
+        if reverse:
+            distance = -distance
+
+        prop_coeff = self.get_propagation_coefficient(freq)
+        phase = -prop_coeff*distance
+        
+        if self.radius_in == self.radius_out:
+            rat_apex_dist = 1
+            rat_apex_len = 0
+            phase_apex_inv = 0
+            phase_to_inv=0
+            phase_mix_inv = 0
+        else:
+            dist_apex_from = self.get_distance_to_apex(from_pos)
+            dist_apex_to = self.get_distance_to_apex(to_pos)
+            rat_apex_dist = dist_apex_to/dist_apex_from
+            rat_apex_len = distance/dist_apex_from
+            
+            phase_apex_inv = 1/(prop_coeff*dist_apex_from)
+            phase_to_inv = 1/(prop_coeff*dist_apex_to)
+            phase_mix_inv = distance/(prop_coeff*dist_apex_from**2)
+
+        return np.array([[rat_apex_dist*(np.cos(phase) - phase_to_inv*np.sin(phase)),
+                          1j*self.normalized_impedance*np.sin(phase)/rat_apex_dist],
+                         [1j/self.normalized_impedance*(
+                             (rat_apex_dist - phase_apex_inv**2)*np.sin(phase) + 
+                             (phase_mix_inv) *np.cos(phase)),
+                          (np.cos(phase)+np.sin(phase)*phase_apex_inv)/rat_apex_dist]])
+
+
 class StraightDuct(DuctSection):
     """
     Straight section of a duct
@@ -606,11 +816,20 @@ class PerfectOpenEnd(TerminationImpedance):
     pass
 
 class FlangedPiston(TerminationImpedance):
-    def __init__(self, radius=0.1):
+    def __init__(self, radius=None):
         super(FlangedPiston,self).__init__()
-        self.radius=radius
+        self._own_radius = radius
+        if radius is None:
+            self.radius=0.1
         self._reset_impedance()
         self.approx=False
+
+    def set_parent(self,parent):
+        if self._own_radius is None:
+            self.radius = parent.elements[-1].get_output_radius()
+        else:
+            self.radius = self._own_radius
+        super(FlangedPiston,self).set_parent(parent)
 
     def _get_impedance_at_freq(self, f):
         c = self.get_speed_of_sound()
@@ -715,7 +934,7 @@ class PortImpedance(object):
 
     def plot_impedance(self, ax=None, fmin=1.0,
                        fmax=4000.0, npoints=200,
-                       scale_type='db'):
+                       scale_type='db',label=None):
         """
         plot the impedance as a function of frequency
 
@@ -726,6 +945,9 @@ class PortImpedance(object):
             fig, ax = pl.subplots(2, sharex=True)
         else:
             newfig = False
+
+        if label is None:
+            label = ''
 
         fvec = np.linspace(fmin, fmax, npoints)
         # zvec = np.array([self.get_input_impedance_at_freq(f) for f in fvec])
@@ -738,10 +960,10 @@ class PortImpedance(object):
             y = np.abs(zvec)
             ylabel = 'kg$\cdot$m$^{-4}\cdot$s$^{-1}$'
 
-        ax[0].plot(fvec, y)
+        ax[0].plot(fvec, y, label=label)
         if scale_type == 'log' and newfig:
             ax[0].set_yscale('log')
-        ax[1].plot(fvec, np.angle(zvec))
+        ax[1].plot(fvec, np.angle(zvec), label=label)
 
         if newfig:
             ax[0].set_ylabel(ylabel)
