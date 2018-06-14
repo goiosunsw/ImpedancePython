@@ -186,6 +186,7 @@ class DuctSection(object):
         self.cross_section = 1.
         self.normalized_impedance = 1.0
         self.impedance_multiplier = 1.0
+        self.gamma = 1.4
         self.parent = None
 
     def get_input_radius(self):
@@ -377,7 +378,6 @@ class StraightDuct(DuctSection):
         self.length = length
 
         self._recalc()
-        self.gamma = 1.4
         self.loss_multiplier = loss_multiplier
 
     def _recalc(self):
