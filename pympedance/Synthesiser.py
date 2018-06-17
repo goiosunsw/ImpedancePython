@@ -567,7 +567,7 @@ class ConicalDuct(DuctSection):
                          [1j/self.normalized_impedance*(
                              (rat_apex_dist - phase_apex_inv**2)*np.sin(phase) + 
                              (phase_mix_inv) *np.cos(phase)),
-                          (np.cos(phase)+np.sin(phase)*phase_apex_inv)/rat_apex_dist]])
+                          (np.sin(phase)*phase_apex_inv+np.cos(phase))/rat_apex_dist]])
 
 
 class StraightDuct(DuctSection):
