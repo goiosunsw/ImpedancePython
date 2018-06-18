@@ -480,8 +480,16 @@ class ConicalDuct(DuctSection):
         [p_out, p_in]_from_pos = T [p_out, p_in]_to_pos
         """
 
+        if from_pos == 0.0:
+            from_rad = self.get_input_radius()
+        else:
+            from_rad = self.get_radius_at_position(from_pos)
+
         if to_pos is None:
             to_pos = self.get_length()
+            to_rad = self.get_output_radius()
+        else:
+            to_rad = self.get_radius_at_position(to_pos)
 
         # distance = to_pos-from_pos
         # phase = 2*np.pi*freq*distance/self.get_speed_of_sound()
@@ -491,8 +499,33 @@ class ConicalDuct(DuctSection):
         prop_coeff = self.get_propagation_coefficient(freq)
         phase = prop_coeff*distance
 
+        rad_rat = to_rad/from_rad
+
         return np.array([[np.exp(1j*phase), 0],
-                         [0, np.exp(-1j*phase)]])
+                         [0, np.exp(-1j*phase)]]) / rad_rat
+
+    def transfer_to_travelling_mx(self, freq=None, pos=0.0):
+        """
+        Return the matrix X corresponding to:
+
+        +- -+     +-  -+
+        | p |     | p+ |
+        |   | = X |    |
+        | u |     | p- |
+        +- -+     +-  -+
+        """
+        
+        if pos==0.0:
+            rad = self.get_input_radius()
+        else:
+            rad = self.get_radius_at_position(pos)
+
+        cross_sect = np.pi*rad**2
+        # cone "characteristic impedance" p+/u+
+
+        phase_apex_inv = 1/(prop_coeff*dist_apex_from)
+        ych = (1+phase_apex_inv)*self.normalized_impedance
+        return np.array([[1,1],[ych, np.conjugate(ych)]])
 
     def transfer_mx_at_freq(self, freq=0.0):
         """
@@ -526,6 +559,33 @@ class ConicalDuct(DuctSection):
         return apex+pos
 
     def normalized_two_point_transfer_mx_at_freq(self, freq=0.0,
+                                                 from_pos=0.0,
+                                                 to_pos=None,
+                                                 reverse=False):
+
+        """
+        return the normalized transfer matrix M of the
+        duct section between from_pos to end_pos.
+
+        [p, Zc u]_from_pos = M [p, Zc u]_to_pos
+        """
+        if to_pos is None:
+            to_pos = self.get_length()
+
+        distance = to_pos-from_pos
+        if reverse:
+            distance = -distance
+
+        prop_coeff = self.get_propagation_coefficient(freq)
+        phase = -prop_coeff*distance
+
+        cmx_to = self.transfer_to_travelling_mx(freq=freq,pos=to_pos)
+        cmx_from = self.transfer_to_travelling_mx(freq=freq,pos=from_pos)
+        trav_mx = self.two_point_travelling_mx_at_freq(freq=freq,
+                from_pos=from_pos, to_pos=to_pos)
+        return np.matmul(np.inv(cmx_to),trav_mx,cmx_from)
+
+    def normalized_two_point_transfer_mx_at_freq_one_go(self, freq=0.0,
                                                  from_pos=0.0,
                                                  to_pos=None,
                                                  reverse=False):
