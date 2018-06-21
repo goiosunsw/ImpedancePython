@@ -501,8 +501,8 @@ class ConicalDuct(DuctSection):
 
         rad_rat = to_rad/from_rad
 
-        return np.array([[np.exp(1j*phase), 0],
-                         [0, np.exp(-1j*phase)]]) / rad_rat
+        return np.array([[np.exp(1j*phase), np.zeros_like(phase)],
+                         [np.zeros_like(phase), np.exp(-1j*phase)]]) * rad_rat
 
     def transfer_to_travelling_mx(self, freq=None, pos=0.0):
         """
@@ -522,10 +522,15 @@ class ConicalDuct(DuctSection):
 
         cross_sect = np.pi*rad**2
         # cone "characteristic impedance" p+/u+
-
-        phase_apex_inv = 1/(prop_coeff*dist_apex_from)
-        ych = (1+phase_apex_inv)*self.normalized_impedance
-        return np.array([[1,1],[ych, np.conjugate(ych)]])
+        prop_coeff = self.get_propagation_coefficient(freq)
+        ones = np.ones_like(prop_coeff)
+        if self.radius_in == self.radius_out:
+            ych = ones * self.normalized_impedance
+        else:
+            dist_apex_from = self.get_distance_to_apex(pos)
+            phase_apex_inv = 1/(1j*prop_coeff*dist_apex_from)
+            ych = (1+phase_apex_inv)/self.normalized_impedance
+        return np.array([[ones,ones],[ych, -np.conjugate(ych)]])
 
     def transfer_mx_at_freq(self, freq=0.0):
         """
@@ -583,8 +588,12 @@ class ConicalDuct(DuctSection):
         cmx_from = self.transfer_to_travelling_mx(freq=freq,pos=from_pos)
         trav_mx = self.two_point_travelling_mx_at_freq(freq=freq,
                 from_pos=from_pos, to_pos=to_pos)
-        return np.matmul(np.inv(cmx_to),trav_mx,cmx_from)
+        final = np.ones_like(trav_mx)
+        for ii in range(trav_mx.shape[2]):
+            tmp = np.matmul(trav_mx[:,:,ii], cmx_from[:,:,ii])
+            final[:,:,ii] = np.matmul(np.linalg.inv(cmx_to[:,:,ii]), tmp)
 
+        return final
     def normalized_two_point_transfer_mx_at_freq_one_go(self, freq=0.0,
                                                  from_pos=0.0,
                                                  to_pos=None,
