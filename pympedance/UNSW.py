@@ -902,7 +902,7 @@ class ImpedanceIteration(object):
         A = param.A
         harm_lo = param.harm_lo
         harm_hi = param.harm_hi
-        n_channel_first = param.n_channel_first
+        n_channel_first = 1 #param.n_channel_first
         mic_spacing = param.mic_pos
         n_mics = len(mic_spacing)
         # shouldn't it be...
