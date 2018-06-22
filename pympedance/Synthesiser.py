@@ -1618,3 +1618,76 @@ def profile_to_duct(lengths=None, rad=None, x=None, reverse=False,
         vt.set_termination(PerfectClosedEnd())
 
     return vt
+
+def vocal_tract_reader(filename, columns=None,
+                       skiprows=0,
+                       unit_multiplier=1.,
+                       loss_multiplier=1.,
+                       n_segments=100):
+    """
+    reads a vocat tract file with two columns:
+        * By default first column has lengths and second column has radii in m
+        * Valid column names are:
+            + lengths
+            + positions (segment limits: first segment starts at 0)
+            + radii
+            + area
+        * Choose unit multiplier to convert units to m. for example, 1000 means
+        the units of the file is mm, and .5 means the units are in m but the
+        column represents diameter
+
+    returns a pympedance.Synthesiser.Duct object
+    """
+    import pandas as pd
+
+    if columns:
+        vtpd = pd.read_csv(filename, header=None, skiprows=skiprows)
+    else:
+        vtpd = pd.read_csv(filename)
+        columns = vtpd.columns
+
+    #print( vtpd)
+    for ic, col in enumerate(columns):
+        if col[:3].lower() == 'len':
+            l = np.array(vtpd.iloc[:,ic].tolist())*unit_multiplier
+            x = np.concatenate(([0],np.cumsum(l)))
+        elif col[:3].lower() == 'pos' or col[:3].lower() == 'dis':
+            x = np.array(vtpd.iloc[:,ic].tolist())*unit_multiplier
+            x0 = np.concatenate(([0], x))
+            l = np.diff(x0)
+        elif col[:3].lower() == 'rad':
+            r = np.array(vtpd.iloc[:,ic].tolist())*unit_multiplier
+        elif col[:3].lower() == 'dia':
+            r = np.array(vtpd.iloc[:,ic].tolist())*unit_multiplier/2
+        elif col[:3].lower() == 'are':
+            r = (np.array(vtpd.iloc[:,ic].tolist())/np.pi)**.5*unit_multiplier
+        else:
+            sys.stderr.write('Column {} ({}) skipped\n'.format(ic, col))
+
+    #print(l)
+    # find 0 or negative lengths, warn and remove them
+#     nnp = (l <= 0)
+#     if sum(nnp) > 0:
+#         sys.stderr.write('Segments skipped:\n')
+#         for ii in nnp:
+#             if ii:
+#                 sys.stderr.write('  {}: l={}, r={}\n'.format(ii, l[ii], r[ii]))
+#         r = r[np.logical_not(nnp)]
+#         l = l[np.logical_not(nnp)]
+    
+    #print(np.array([r,l]).T)
+    l_tot = max(x)
+    xpos = np.linspace(0,l_tot,n_segments+1)
+    l_seg = l_tot/(n_segments)
+    radii = np.interp(xpos,x,r)
+    
+    vt = Duct()
+    vt.append_element(StraightDuct(length=l_seg/2,radius=radii[0],loss_multiplier=loss_multiplier))
+    for rr in radii[1:-1]:
+        vt.append_element(StraightDuct(length=l_seg,radius=rr,loss_multiplier=loss_multiplier))
+    vt.append_element(StraightDuct(length=l_seg/2,radius=radii[-1],loss_multiplier=loss_multiplier))
+    vt.set_termination(FlangedPiston(radius=radii[-1]))
+    #vt.set_termination(psy.PerfectOpenEnd())
+    #vt = psy.profile_to_duct(lengths=l, rad=r, reverse=True,loss_multiplier=2.0)#, nsegments=None)
+    
+    return vt
