@@ -1226,24 +1226,28 @@ class BroadBandExcitation(object):
 
     can be shaped to a desired spectrum profile
     """
-    def __init__(self, n_points=1024, n_cycles=1):
+    def __init__(self, n_points=1024, n_cycles=1, harm_lo=1, harm_hi=None):
         """
         creates a broadband "noise" signal object
         """
         self.n_points = n_points
         self.n_cycles = n_cycles
         self.harm_lo = harm_lo
-        self.harm_hi = harm_hi
+        if harm_hi is not None:
+            self.harm_hi = harm_hi
+        else:
+            self.harm_hi = n_points
         self.spectrum = np.ones(int(n_points/2))
 
     def generate_cycle(self):
         """
         generates a single cycle of the the sound
         """
-        spec = self.spectrum * 2*np.pi*np.rand.random(self.spectrum.shape[0])
-        x = spectrum_to_waveform(self.spectrum, sel.n_points)
-
-
+        spec = self.spectrum * np.exp(2j*np.pi*np.random.rand(self.spectrum.shape[0]))
+        spec[:self.harm_lo] = 0
+        spec[self.harm_hi:] = 0
+        x = spectrum_to_waveform(spec, self.n_points)
+        return x
 
     def generate_sound(self):
         """
@@ -1252,6 +1256,7 @@ class BroadBandExcitation(object):
 
         cycle = self.generate_cycle()
         return np.tile(cycle, self.n_cycles)
+
 
 def lscov(a, b, w, rcond=None):
     """
@@ -1263,9 +1268,9 @@ def lscov(a, b, w, rcond=None):
     """
     #t = np.sqrt(np.diag(w))
     t = np.linalg.cholesky(w)
-    ta=np.linalg.solve(t,a)
-    tb=np.linalg.solve(t,b)
-    return np.linalg.lstsq(ta,tb,rcond=rcond)
+    ta = np.linalg.solve(t, a)
+    tb = np.linalg.solve(t, b)
+    return np.linalg.lstsq(ta, tb, rcond=rcond)
 
 # TODO:
 # The result is slightly different when applying the analysis to
