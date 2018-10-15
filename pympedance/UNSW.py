@@ -1226,7 +1226,9 @@ class BroadBandExcitation(object):
 
     can be shaped to a desired spectrum profile
     """
-    def __init__(self, n_points=1024, n_cycles=1, harm_lo=1, harm_hi=None):
+    def __init__(self, n_points=1024, n_cycles=1, 
+                 harm_lo=1, harm_hi=None,
+                 sr=1.0, freq_lo=None, freq_hi=None):
         """
         creates a broadband "noise" signal object
         """
@@ -1237,16 +1239,72 @@ class BroadBandExcitation(object):
             self.harm_hi = harm_hi
         else:
             self.harm_hi = n_points
-        self.spectrum = np.ones(int(n_points/2))
+
+        self.sr = sr
+        if freq_lo is not None:
+            self.freq_lo = freq_lo
+        if freq_hi is not None:
+            self.freq_hi = freq_hi
+        self.spectral_env = np.ones(int(n_points/2))
+        self.spectrum = self.generate_spectrum()
+
+    @property
+    def freq_lo(self):
+        return self._harm_lo*self.sr/self.n_points
+
+    @freq_lo.setter
+    def freq_lo(self, val):
+        self.harm_lo = int(np.round(val/self.sr*self.n_points))
+
+    @property
+    def freq_hi(self):
+        return self._harm_hi*self.sr/self.n_points
+
+    @freq_hi.setter
+    def freq_hi(self, val):
+        self. harm_hi = int(np.round(val/self.sr*self.n_points))
+
+    @property
+    def harm_lo(self):
+        return self._harm_lo
+
+    @harm_lo.setter
+    def harm_lo(self,harm_lo):
+        harm_lo = int(np.round(harm_lo))
+        harm_lo = min(harm_lo, self.n_points)
+        harm_lo = max(harm_lo, 0)
+        self._harm_lo = harm_lo
+
+    @property
+    def harm_hi(self):
+        return self._harm_hi
+    
+    @harm_hi.setter
+    def harm_hi(self,harm_hi):
+        harm_hi = int(np.round(harm_hi))
+        harm_hi = min(harm_hi, self.n_points)
+        harm_hi = max(harm_hi, 0)
+        self._harm_hi = harm_hi
+
+    @property
+    def frequency_vector(self):
+        return np.arange(self.harm_lo, self.harm_hi+1) * (self.sr /
+                                                       self.n_points)
+
+    def generate_spectrum(self):
+        phases = np.exp(2j * np.pi *
+                        np.random.rand(self.spectral_env.shape[0]))
+
+        spec = self.spectral_env * phases
+        spec[:self.harm_lo] = 0
+        spec[self.harm_hi:] = 0
+        return spec
 
     def generate_cycle(self):
         """
         generates a single cycle of the the sound
         """
-        spec = self.spectrum * np.exp(2j*np.pi*np.random.rand(self.spectrum.shape[0]))
-        spec[:self.harm_lo] = 0
-        spec[self.harm_hi:] = 0
-        x = spectrum_to_waveform(spec, self.n_points)
+        x = spectrum_to_waveform(self.spectrum, self.n_points)
         return x
 
     def generate_sound(self):
