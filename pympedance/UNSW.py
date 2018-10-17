@@ -72,7 +72,10 @@ def mat_parameter_from_file(matfile):
     try:
         parameters = mdata['Parameters'][0,0]
     except KeyError:
-        parameters = mdata
+        try:
+            parameters = mdata['PARAMS'][0,0]
+        except KeyError:
+            parameters = mdata
     try:
         parameters['harmLo']
         parameters['numPoints']
@@ -572,7 +575,7 @@ class MeasurementParameters(object):
             self.radius = np.asscalar(parameters['radius'])
             self.density = np.asscalar(parameters['rho'])
             self.speed_of_sound = np.asscalar(parameters['speedOfSound'])
-        except KeyError:
+        except (KeyError, ValueError):
             self.can_recalculate = False
 
         self.harm_lo = np.asscalar(parameters['harmLo'])
@@ -581,13 +584,13 @@ class MeasurementParameters(object):
         self.sr = np.asscalar(parameters['samplingFreq'])
         try:
             self.n_channel_first = np.asscalar(parameters['nChannelFirst'])
-        except KeyError:
+        except (KeyError, ValueError):
             logging.warn('First head channel not defined, setting to 1')
             self.n_channel_first = 1
         # self.num_cycles = np.asscalar(parameters['numCycles'])
         try:
             self.mic_pos = np.squeeze(parameters['micSpacing'])
-        except KeyError:
+        except (KeyError, ValueError):
             logging.warning('microphone positions not known')
             self.mic_pos = None
 
