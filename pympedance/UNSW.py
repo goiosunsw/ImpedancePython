@@ -594,9 +594,12 @@ class MeasurementParameters(object):
             logging.warning('microphone positions not known')
             self.mic_pos = None
 
-        assert self.freq_lo == np.asscalar(parameters['freqLo'])
-        assert self.freq_hi == np.asscalar(parameters['freqHi'])
-        assert self.freq_incr == np.asscalar(parameters['freqIncr'])
+        try:
+            assert self.freq_lo == np.asscalar(parameters['freqLo'])
+            assert self.freq_hi == np.asscalar(parameters['freqHi'])
+            assert self.freq_incr == np.asscalar(parameters['freqIncr'])
+        except ValueError:
+            logging.warn('using deduced frequency parameters')
         try:
             self.A = parameters['A'].squeeze()
         except (KeyError, ValueError):
@@ -1045,19 +1048,45 @@ class ImpedanceMeasurement(object):
 
 
         miter = mm['Iteration'].flatten()
-        out_sig = mm['Iteration'][0,0]['Output'][0,0]['waveform']
+        try:
+            out_sig = mm['Iteration'][0,0]['Output'][0,0]['waveform']
+        except ValueError:
+            logging.warn('no excitation signal in file')
+            out_sig=None
 
         self.iterations = []
         for ii in range(len(miter)):
-            in_sig = miter[ii]['Input'][0,0]['originalWaveform']
-            this_it = ImpedanceIteration(input_signals=in_sig,
-                                  output_signal=out_sig,
-                                  parameters=self.parameters)
+            try:
+                in_sig = miter[ii]['Input'][0,0]['originalWaveform']
+                this_it = ImpedanceIteration(input_signals=in_sig,
+                                      output_signal=out_sig,
+                                      parameters=self.parameters)
+            except ValueError:
+                logging.warn('no raw signals')
+                from collections import namedtuple
+                this_it = namedtuple('Iteration','z')
+                this_it.z = miter[ii]['meanZ']
 
             self.iterations.append(this_it)
 
         assert len(self.iterations) > 0, 'no iteration measurements found!'
         self.z = miter[-1]['meanZ'].squeeze()
+
+    def save_mat(self, filename):
+        from numpy.core.records import fromarrays
+        param_dict = {'frequencyVect':self.parameters.frequency_vector,
+                      'harmLo': self.parameters.harm_lo,
+                      'harmHi': self.parameters.harm_hi,
+                      'numPoints': self.parameters.num_points,
+                      'samplingFreq': self.parameters.sr}
+        #iteration = np.array([self.iterations[-1].z],
+        #                      dtype=[('meanZ','O')])
+        iteration = {'meanZ':self.iterations[-1].z}
+        mat_dict = {'Iteration':iteration,
+                    'Parameters':param_dict}
+        #mat_dict = fromarrays([[param_dict,iteration]],
+        #                      names=['Parameters','Iteration'])
+        matlab.savemat(filename,mat_dict)
 
     def get_channels_spectra(self, channel_list):
         """
