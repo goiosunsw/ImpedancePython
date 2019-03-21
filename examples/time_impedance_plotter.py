@@ -78,7 +78,7 @@ class ImVecWind(object):
         self.ax_tf.imshow(20*np.log10(np.abs(self.tfmx)),
           extent=[0,self.tvec[-1],self.fvec[0],self.fvec[-1]],
           aspect='auto',
-          origin='bottom')
+          origin='bottom',cmap='gray')
         pl.colorbar(cax=self.ax_cbar, mappable=self.ax_tf.images[0])
 
         self.fig.canvas.mpl_connect('button_press_event', self.onclick)
