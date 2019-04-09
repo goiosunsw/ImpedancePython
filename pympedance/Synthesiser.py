@@ -111,6 +111,70 @@ def transfer_to_travelling_mx(transfer, char_impedance=1.0):
             trav[:,:,ii] = np.dot(ttm, trav[:,:,ii])
     return trav
 
+    def to_json(self, filename):
+        last_pos = 0
+        segment_dict = {'elements':[]}
+        for x, el in zip(self.element_positions, self.elements):
+            if type(el) is StraightDuct:
+                element_dict = {'type':'StraightDuct',
+                                'position':x,
+                                'length':el.length,
+                                'radius':el.radius,
+                                'loss_multiplier':el.loss_multiplier}
+            elif type(el) is StraightDuctWithParallel:
+                element_dict = {'type':'StraightDuctWithParallel',
+                                'position':x,
+                                'length':el.length,
+                                'radius':el.radius,
+                                'loss_multiplier':el.loss_multiplier,
+                                'compliance':el.compliance,
+                                'inertance':el.inertance,
+                                'resistance':el.resistance}
+            segment_dict['elements'].append(element_dict)
+            last_pos = x
+
+        if type(self.termination) is PerfectAnechoicEnd:
+            term = {'type':'PerfectAnechoicEnd'}
+        elif type(self.termination) is PerfectClosedEnd:
+            term = {'type':'PerfectClosedEnd'}
+        elif type(self.termination) is PerfectOpenEnd:
+            term = {'type':'PerfectOpenEnd'}
+        elif type(self.termination) is FlangedPiston:
+            term = {'type':'FlangedPiston',
+                    'radius':self.termination.radius}
+        segment_dict['termination']=term
+        import json
+        with open(filename,'w') as f:
+            json.dump(segment_dict,f,indent=4)
+
+
+def json_to_duct(filename):
+    import json
+    duct = Duct()
+    segment_dict = json.load(filename)
+    for el in segment_dict['elements']:
+        if el['type'] == 'StraightDuct':
+            s = StraightDuct(length=el['length'],
+                             radius=el['radius'],
+                             loss_multiplier=el['loss_multiplier'])
+        elif el['type'] == 'StraightDuctWithParallel':
+            s = StraightDuctWithParallel(length=el['length'],
+                                         radius=el['radius'],
+                                         loss_multiplier=el['loss_multiplier'],
+                                         compliance=el['compliance'],
+                                         inertance=el['inertance'],
+                                         resistance=el['resistance'])
+        duct.append_element(s)
+    t = segment_dict('Termination')
+    if t['type'] == 'PerfectAnechoicEnd':
+        term = PerfectAnechoicEnd()
+    elif t['type'] == 'PerfectClosedEnd':
+        term = PerfectClosedEnd()
+    elif t['type'] == 'PerfectOpenEnd':
+        term = PerfectOpenEnd()
+    elif t['type'] == 'FlangedPiston':
+        term = FlangedPiston(radius=t['radius'])
+
 
 class AcousticWorld(object):
     """
@@ -594,6 +658,7 @@ class ConicalDuct(DuctSection):
             final[:,:,ii] = np.matmul(np.linalg.inv(cmx_to[:,:,ii]), tmp)
 
         return final
+        
     def normalized_two_point_transfer_mx_at_freq_one_go(self, freq=0.0,
                                                  from_pos=0.0,
                                                  to_pos=None,
@@ -809,6 +874,98 @@ class StraightDuct(DuctSection):
                           1j*self.normalized_impedance*np.sin(phase)],
                          [1j/self.normalized_impedance*np.sin(phase),
                           np.cos(phase)]])
+
+
+class StraightDuctWithParallel(StraightDuct):
+    def __init__(self, *args, **kwargs):
+        """
+        Straight duct with parallel lumped elements
+        Simulates a duct with flexible walls
+
+        parameters:
+            (common with StraightDuct)
+            * length (m)
+            * radius (m)
+            * loss_multiplier: increases viscothermal losses by factor
+            (specific)
+            * compliance: wall compliance
+            * inertance: wall mass (acoustic)
+            * resistance: wall mechanical resistance
+
+        components are added in parallel to duct input
+        """
+        self.compliance = kwargs.pop('compliance',None)
+        self.inertance = kwargs.pop('inertance',None)
+        self.resistance = kwargs.pop('resistance',None)
+        super(StraightDuctWithParallel, self).__init__( *args, **kwargs)
+         
+    def two_point_transfer_mx_at_freq(self, *args, **kwargs):
+        """
+        return the travelling wave matrix T of the
+        duct section between from_pos to end_pos.
+
+        [p_out, p_in]_from_pos = T [p_out, p_in]_to_pos
+        """
+
+        tmx = super().two_point_transfer_mx_at_freq( *args, **kwargs)
+        print('twopt')
+
+        omega = 2*np.pi*kwargs['freq']
+        zpar = 0
+            
+        if self.compliance is not None:
+            ycomp = 1j*omega*self.compliance
+            zpar += 1/ycomp
+
+        if self.inertance is not None:
+            yinert = 1/(1j*omega*self.inertance)
+            zpar += 1/yinert
+
+        if self.resistance is not None:
+            yresist = 1/self.resistance
+            zpar += 1/yresist
+
+        zpar /= self.char_impedance
+        tmx[1,0] += tmx[0,0]*zpar
+        tmx[1,1] += tmx[0,1]*zpar
+            
+        return tmx
+
+    def normalized_two_point_transfer_mx_at_freq(self, *args, **kwargs):
+        """
+        return the travelling wave matrix T of the
+        duct section between from_pos to end_pos.
+
+        [p_out, p_in]_from_pos = T [p_out, p_in]_to_pos
+        """
+
+        tmx = super().normalized_two_point_transfer_mx_at_freq( *args, **kwargs)
+        try:
+            freq = args[0]
+        except IndexError:
+            freq = kwargs['freq']
+       
+        omega = 2*np.pi*freq
+        zpar = 0
+            
+        if self.compliance is not None:
+            ycomp = 1j*omega*self.compliance
+            zpar += 1/ycomp
+
+        if self.inertance is not None:
+            yinert = 1/(1j*omega*self.inertance)
+            zpar += 1/yinert
+
+        if self.resistance is not None:
+            yresist = 1/self.resistance
+            zpar += 1/yresist
+
+        zpar /= self.char_impedance
+ 
+        tmx[1,0] += tmx[0,0]/zpar
+        tmx[1,1] += tmx[0,1]/zpar
+            
+        return tmx
 
 
 class TerminationImpedance(DuctSection):
