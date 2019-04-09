@@ -598,7 +598,7 @@ class MeasurementParameters(object):
             assert self.freq_lo == np.asscalar(parameters['freqLo'])
             assert self.freq_hi == np.asscalar(parameters['freqHi'])
             assert self.freq_incr == np.asscalar(parameters['freqIncr'])
-        except ValueError:
+        except (ValueError, AssertionError):
             logging.warn('using deduced frequency parameters')
         try:
             self.A = parameters['A'].squeeze()
