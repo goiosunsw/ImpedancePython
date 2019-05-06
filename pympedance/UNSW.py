@@ -169,6 +169,65 @@ class MeasurementParameters(object):
                                      axes=[2,0,1])
         return sigma_variable
 
+    def windowed_spectrum(self, x, start=0, 
+                          nwind=None,
+                          window=None,
+                          method='fft',
+                          nhop=None):
+        """
+        chops wavefile into excitation loops and calculates spectra
+
+        input_waves (N_samples x N_channels)
+
+        optional:
+            discard_loops: remove N loops from beginning and end
+
+        returns an array with (samples_per_loop/2+1) X N_loops X N_channels
+        """
+
+        input_waves = x
+
+        if  nwind is None:
+            nsamp = self.num_points
+        else:
+            nsamp = nwind
+
+        if window is not None:
+            wind = sig.get_window(window, nsamp)
+        else:
+            wind = np.ones(nsamp)
+
+        if nhop is None:
+            nhop = nsamp
+
+        all_spec = []
+        all_coh = []
+
+        for chno in range(0,input_waves.shape[1]):
+            chspec = []
+            if method == 'fft':
+                for n in range(0,input_waves.shape[0]-nsamp+1,nhop):
+                    w = input_waves[n:n+nsamp,chno]
+                    #wspec = np.fft.fft(w*wind)
+                    wspec = waveform_to_spectrum(w*wind)
+                    chspec.append(wspec[:int(nsamp/2+1)])
+                all_spec.append(chspec)
+            elif method == 'tf':
+                wspec = tfe(y=input_waves[:,chno],
+                            x=excitation_signal,
+                            nfft=nsamp, nhop=nhop,
+                            window=wind)
+                wcoh = sig.coherence(y=input_waves[:,chno],
+                            x=excitation_signal,
+                            nfft=nsamp, nhop=nhop,
+                            window=wind)
+                all_spec.append([wspec])
+                all_coh.append(wcoh)
+
+        return np.array(all_spec).transpose((2,1,0))
+
+
+
     def analyse_input(self, mean_spectrum, spectral_error=None, indices=None):
         """
         Calculate pressure and flow at reference plane
@@ -182,7 +241,7 @@ class MeasurementParameters(object):
 
         if indices is None:
             harms = np.arange(param.harm_lo, param.harm_hi+1)
-            indices = range(A.shape[2])
+            indices = range(param.A.shape[2])
         else:
             harms = np.array(indices)+param.harm_lo
 
@@ -233,7 +292,7 @@ class MeasurementParameters(object):
             if n_mics == 1:
                 x,_,_,_ = lstsq(A[:,:,freq_count], b[:,:,freq_count])
                 # matrix is not square so use pseudoinverse
-                Ainv = pinv(A[:,:,freqCount])
+                Ainv = pinv(A[:,:,freq_count])
             elif n_mics == 2:
                 x,_,_,_ = lstsq(A[:,:,freq_count], b[:,:,freq_count])
                 Ainv = np.linalg.inv(A[:,:,freq_count])
@@ -669,12 +728,15 @@ class MeasurementParameters(object):
 
     @property
     def frequency_vector(self):
-        return np.arange(self.harm_lo, self.harm_hi+1) * (self.sr /
-                                                       self.num_points)
+        return self.harm_vector * (self.sr / self.num_points)
+
+    @property
+    def harm_vector(self):
+        return np.arange(self.harm_lo, self.harm_hi+1) 
 
     def theoretical_flange(self, freq=None):
         if freq is None:
-            freq = self.frequency_vector()
+            freq = self.frequency_vector
 
         omega = 2*np.pi*freq
         ka = (omega/self.speed_of_sound) * self.radius
@@ -780,7 +842,7 @@ class ImpedanceIteration(object):
         return sum_waveform / self.n_loops
 
     def get_mic_spectra_per_loop(self,
-                        nwind=1024,
+                        nwind=None,
                         window=None,
                         method='fft',
                         nhop=None):
@@ -797,7 +859,11 @@ class ImpedanceIteration(object):
 
         input_waves = self.input_signals
 
-        nsamp = nwind
+        if  nwind is None:
+            nsamp = self.param.num_points
+        else:
+            nsamp = nwind
+
         if window is not None:
             wind = sig.get_window(window, nsamp)
         else:
@@ -888,12 +954,12 @@ class ImpedanceIteration(object):
         fvec = self.param.frequency_vector
         # otherwise, choose a noise function of f^(-0.5)
         sigma_variable = (fvec**(-0.5) *
-                         np.ones((1,spectral_error.shape[1])))
+                          np.ones((1,self.mean_spectrum.shape[0])))
         sigma_variable = np.transpose(np.array([sigma_variable]),
                                      axes=[2,0,1])
         return sigma_variable
 
-    def analyse_input(self, mean_spectrum, spectral_error,
+    def analyse_input(self, mean_spectrum, spectral_error=None,
                       loop_no=-1, meas_type='Averaged'):
         """
         Calculate pressure and flow at reference plane
@@ -915,6 +981,7 @@ class ImpedanceIteration(object):
         # nChannelLast = nChannelFirst + nMics
         n_channel_last = n_mics
         fvec = param.frequency_vector
+
 
         spectral_error = self.spectral_error[harm_lo:harm_hi+1,
                                              n_channel_first-1:n_channel_last]

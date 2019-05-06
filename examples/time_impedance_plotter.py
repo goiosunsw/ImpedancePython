@@ -1,23 +1,12 @@
 #!/usr/bin/env python
 """
-    duct_acoustics
-    --------------
+    time_impedance_plotter.py
+    -------------------------
 
-    Calculates simulated impedance and pressure distribution in
-    an acoustic duct.
+    Plots the time evolution of impedance measurements in a time-frequency
+    graph similar to a spectrogram
 
-    Duct geometry can be given (in meters) in a CSV file containing tow
-    columns:
-        * 1st column: segment length
-        * 2nd column: segment radius
-
-    Plots duct geometry, impedance and pressure distribution
-
-    Depends on pympedance: https://github.com/goiosunsw/ImpedancePython.git
-
-    Author: Andre Almeida <a.almeida@unsw.edu.au> 
-    Creation date: 2018/04/02
-    Version: 0.0.1
+    Input file should be a UNSW measurement
 """
 
 import sys
