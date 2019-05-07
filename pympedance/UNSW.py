@@ -228,7 +228,8 @@ class MeasurementParameters(object):
 
 
 
-    def analyse_input(self, mean_spectrum, spectral_error=None, indices=None):
+    def analyse_input(self, mean_spectrum, spectral_error=None, indices=None,
+                      channels=None):
         """
         Calculate pressure and flow at reference plane
         """
@@ -247,13 +248,16 @@ class MeasurementParameters(object):
 
         A = param.A[:,:,indices]
 
-        n_channel_first = param.n_channel_first
         mic_spacing = param.mic_pos
         n_mics = len(mic_spacing)
         # shouldn't it be...
         # nChannelLast = nChannelFirst + nMics
-        n_channel_last = n_mics
+        if channels is None:
+            n_channel_first = param.n_channel_first
+            n_channel_last = n_channel_first + n_mics
+            channels = np.arange(n_channel_first-1,n_channel_last)
 
+        channels = np.array(channels)
         if noise_calculated:
             sigma_variable = self.calc_sigma_var_spectral_error(spectral_error)
         else:
@@ -272,8 +276,7 @@ class MeasurementParameters(object):
             #          mean_spectrum[harm_lo: harm_hi+1, 1],
             #          mean_spectrum[harm_lo: harm_hi+1, 2]]
 
-        temp_spectrum = mean_spectrum[harms,
-                                      n_channel_first-1:n_channel_last]
+        temp_spectrum = mean_spectrum[harms[:,np.newaxis],channels]
 
         b = np.transpose(np.array([temp_spectrum]),
                          axes=[2,0,1])
