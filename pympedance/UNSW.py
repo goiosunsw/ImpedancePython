@@ -255,7 +255,7 @@ class MeasurementParameters(object):
         if channels is None:
             n_channel_first = param.n_channel_first
             n_channel_last = n_channel_first + n_mics
-            channels = np.arange(n_channel_first-1,n_channel_last)
+            channels = np.arange(n_channel_first-1,n_channel_last-1)
 
         channels = np.array(channels)
         if noise_calculated:
