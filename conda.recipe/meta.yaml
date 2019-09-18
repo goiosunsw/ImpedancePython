@@ -1,0 +1,36 @@
+{% set version = "0.1.0" %}
+{% set name = "ImpedancePython" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  path: ../
+
+build:
+  number: 0
+  script: python setup.py install --single-version-externally-managed --record=record.txt
+
+requirements:
+  host:
+    - numpy
+    - pip
+    - python
+  run:
+    - scipy
+    - numpy
+    - python
+
+about:
+  home: "https://github.com/goiosunsw/{{ name }}.git"
+  license: "GNU Lesser General Public v3 or later (LGPLv3+)"
+  license_family: "LGPL"
+  license_file: ""
+  summary: "impedance synthesiser and measurement explorer"
+  doc_url: ""
+  dev_url: ""
+
+extra:
+  recipe-maintainers:
+    - goiosunsw
