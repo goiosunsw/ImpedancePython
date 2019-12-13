@@ -788,8 +788,7 @@ class ImpedanceIteration(object):
 
         #self.output_signal = output_signal
 
-    @property
-    def mean_impedance(self):
+    def calc_mean_impedance(self, imin=None, imax=None):
         param = self.param
 
         if not param.can_recalculate:
@@ -799,11 +798,17 @@ class ImpedanceIteration(object):
                                              nwind=param.num_points,
                                              window=param.window,
                                              method=param.spec_method,
-                                             nhop=param.hop)
+                                             nhop=param.hop,
+                                             imin=imin, imax=imax)
 
         analysis = self.analyse_input(mean_input_spect, spectral_error)
         imped = analysis['p']/analysis['u']
         imped = imped.squeeze()
+        return imped
+
+    @property
+    def mean_impedance(self):
+        imped = self.calc_mean_impedance()
         self.z = imped
         return imped
 
@@ -913,7 +918,9 @@ class ImpedanceIteration(object):
                         nwind=None,
                         window=None,
                         method='fft',
-                        nhop=None):
+                        nhop=None,
+                        imin=None,
+                        imax=None):
         """
         Returns mean spectra and spectral error
         """
@@ -924,8 +931,19 @@ class ImpedanceIteration(object):
                                                       window=window,
                                                       method=method,
                                                       nhop=nhop)
-        if discard_loops>0:
-            total_spectrum = total_spectrum[:,discard_loops:-discard_loops,:]
+
+        if imin is None:                                        
+            if discard_loops>0:
+                imin = discard_loops
+            else:
+                imin = 0
+        
+        if imax is None:                                        
+            if discard_loops>0:
+                imax = -discard_loops
+            else:
+                imax = -1
+        total_spectrum = total_spectrum[:,imin:imax,:]
         mean_spectrum = np.nanmean(total_spectrum, axis=1)
         spectral_error = np.nanstd(total_spectrum, axis=1, ddof=1)
         num_cycles = total_spectrum.shape[1]
@@ -1195,6 +1213,9 @@ class ImpedanceMeasurement(object):
     def mean_waveform(self):
         last_iter = self.iterations[-1]
         return last_iter.mean_waveform
+
+    def get_impedance_in(self, imin=None, imax=None):
+        return self.iterations[-1].calc_mean_impedance(imin=imin,imax=imax)
 
     def calculate_impedance(self):
         """
