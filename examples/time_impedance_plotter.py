@@ -189,7 +189,7 @@ class ImVecWind(object):
             #ainv = pun.lscov(pp.A[:,:,fi])
             pui,_,_,_ = pun.lscov(A[:,:,fi],
                                 specs[oi,:],
-                                np.eye(2),
+                                np.eye(specs.shape[1]),
                                 rcond=-1)
             pu.append(pui)
         pu = np.array(pu)
